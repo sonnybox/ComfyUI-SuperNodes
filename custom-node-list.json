@@ -1,5 +1,11 @@
-    {
-      "name": "Super Nodes",
-      "description": "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel.",
-      "git_url": "https://github.com/sonnybox/ComfyUI-SuperNodes.git"
-    }
+{
+  "author": "sonnybox",
+  "title": "ComfyUI-SuperNodes",
+  "id": "supernodes",
+  "reference": "https://github.com/sonnybox/ComfyUI-SuperNodes",
+  "files": [
+    "https://github.com/sonnybox/ComfyUI-SuperNodes"
+  ],
+  "install_type": "git-clone",
+  "description": "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
+}
