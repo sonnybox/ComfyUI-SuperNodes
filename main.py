@@ -130,7 +130,7 @@ class CreateTiles:
     RETURN_TYPES = ("IMAGE", "TILING_DATA")
     RETURN_NAMES = ("tiled_image", "tiling_data")
     FUNCTION = "create_tiles"
-    CATEGORY = CATEGORY + "/upscale"
+    CATEGORY = "upscale"  # Placeholder for your actual category
 
     def tensor_to_pil(self, tensor_image):
         return [Image.fromarray(np.clip(255. * i.cpu().numpy(), 0, 255).astype(np.uint8)) for i in tensor_image]
@@ -154,6 +154,9 @@ class CreateTiles:
 
         tile_width = base_width // columns
         tile_height = base_height // rows
+
+        # Calculate the aspect ratio of a single core tile
+        tile_aspect_ratio = tile_width / tile_height if tile_height > 0 else 1.0
 
         overlap_w_px = (int(tile_width * overlap) // 2) * 2
         overlap_h_px = (int(tile_height * overlap) // 2) * 2
@@ -190,6 +193,7 @@ class CreateTiles:
             "original_height": base_height,
             "overlap_percent_w": overlap_percent_w,
             "overlap_percent_h": overlap_percent_h,
+            "tile_aspect_ratio": tile_aspect_ratio,  # Send tile aspect ratio to the stitcher
         }
 
         return output_tensors, tiling_data
@@ -199,9 +203,9 @@ class StitchTiles:
     """
     A node that takes a batch of tiled images and reconstruction data,
     then reassembles them into a single image. It correctly handles
-    tiles that have been resized after creation (e.g., by an upscaler),
-    can feather the edges to create a seamless blend, and allows for
-    seam adjustments via x/y offsets.
+    tiles that have been resized or stretched (e.g., by an upscaler) by
+    enforcing the original aspect ratio. It can also feather the edges
+    to create a seamless blend.
     """
 
     @classmethod
@@ -211,23 +215,29 @@ class StitchTiles:
                 "image_batch": ("IMAGE",),
                 "tiling_data": ("TILING_DATA",),
                 "feather_edges": ("BOOLEAN", {"default": True}),
-                "offset_x": ("INT", {"default": 0, "min": -2048, "max": 2048, "step": 1}),
-                "offset_y": ("INT", {"default": 0, "min": -2048, "max": 2048, "step": 1}),
+                # Offsets are no longer needed due to the aspect ratio fix.
             },
         }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "untile_images"
-    CATEGORY = CATEGORY + "/upscale"
+    CATEGORY = "upscale"  # Placeholder for your actual category
 
-    def untile_images(self, image_batch: torch.Tensor, tiling_data: dict, feather_edges: bool, offset_x: int,
-                      offset_y: int):
+    def untile_images(self, image_batch: torch.Tensor, tiling_data: dict, feather_edges: bool):
         # --- 1. Unpack data and get dimensions ---
         rows = tiling_data["rows"]
         cols = tiling_data["columns"]
         overlap_percent_w = tiling_data.get("overlap_percent_w", 0.0)
         overlap_percent_h = tiling_data.get("overlap_percent_h", 0.0)
         has_overlap = overlap_percent_w > 0 or overlap_percent_h > 0
+
+        # Get original tile aspect ratio, with a fallback for older data.
+        if "tile_aspect_ratio" in tiling_data:
+            original_tile_aspect_ratio = tiling_data["tile_aspect_ratio"]
+        else:
+            original_tile_w = tiling_data["original_width"] / cols
+            original_tile_h = tiling_data["original_height"] / rows
+            original_tile_aspect_ratio = original_tile_w / original_tile_h if original_tile_h > 0 else 1.0
 
         num_tiles = image_batch.shape[0]
         if num_tiles != rows * cols:
@@ -238,15 +248,16 @@ class StitchTiles:
         print(f"StitchTiles: Received {num_tiles} tiles of size {incoming_w}x{incoming_h}.")
 
         # --- 2. Calculate core, border, and step dimensions of the upscaled tiles ---
-        core_upscaled_w = round(incoming_w / (1 + overlap_percent_w))
         core_upscaled_h = round(incoming_h / (1 + overlap_percent_h))
+        # Derive width from height and original aspect ratio to correct for stretching.
+        core_upscaled_w = round(core_upscaled_h * original_tile_aspect_ratio)
+
         border_w = (incoming_w - core_upscaled_w) // 2
         border_h = (incoming_h - core_upscaled_h) // 2
 
-        # The step size is the distance between the top-left corner of adjacent tiles.
-        # The offset adjusts this distance.
-        step_w = core_upscaled_w - offset_x
-        step_h = core_upscaled_h - offset_y
+        # The step size is now simply the core dimension.
+        step_w = core_upscaled_w
+        step_h = core_upscaled_h
 
         # --- 3. Route to either feathered or non-feathered method ---
         if not feather_edges or not has_overlap:
@@ -268,6 +279,7 @@ class StitchTiles:
 
             final_image = Image.new('RGB', (canvas_w, canvas_h))
             tiles_pil = [Image.fromarray(np.clip(255. * i.cpu().numpy(), 0, 255).astype(np.uint8)) for i in image_batch]
+            # The crop box now correctly extracts the aspect-corrected core of the tile.
             crop_box = (border_w, border_h, incoming_w - border_w, incoming_h - border_h)
 
             tile_index = 0
@@ -294,7 +306,7 @@ class StitchTiles:
                 feather_mask[:border_h, :, :] *= ramp_h.reshape(-1, 1, 1)
                 feather_mask[-border_h:, :, :] *= np.flip(ramp_h).reshape(-1, 1, 1)
 
-            # Calculate canvas size and offsets to handle any negative coordinates from offsets
+            # Calculate canvas size and offsets to handle any negative coordinates
             x_coords = [c * step_w for c in range(cols)]
             y_coords = [r * step_h for r in range(rows)]
             min_x, max_x = min(x_coords), max(x_coords)
