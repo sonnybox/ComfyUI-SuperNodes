@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from PIL import Image, ImageOps
+import torch.nn.functional as F
 
 CATEGORY = "Super Nodes"
 
