@@ -179,6 +179,8 @@ class CreateTiles:
 
         output_tensors = self.pil_to_tensor(tiles_pil)
 
+        # Create the data dictionary using ratios
+        # This allows the untile node to work even if the tiles are resized.
         overlap_percent_w = overlap_w_px / tile_width if tile_width > 0 else 0
         overlap_percent_h = overlap_h_px / tile_height if tile_height > 0 else 0
 
@@ -189,9 +191,6 @@ class CreateTiles:
             "original_height": base_height,
             "overlap_percent_w": overlap_percent_w,
             "overlap_percent_h": overlap_percent_h,
-            # ✨ ADDED: Store original tile dimensions for aspect ratio correction
-            "original_tile_width": tile_width,
-            "original_tile_height": tile_height,
         }
 
         return output_tensors, tiling_data
@@ -201,8 +200,9 @@ class StitchTiles:
     """
     A node that takes a batch of tiled images and reconstruction data,
     then reassembles them into a single image. It correctly handles
-    tiles that have been resized (e.g., by an upscaler) by correcting their
-    aspect ratio, and can feather the edges for a seamless blend.
+    tiles that have been resized after creation (e.g., by an upscaler),
+    can feather the edges to create a seamless blend, and allows for
+    seam adjustments via x/y offsets.
     """
 
     @classmethod
@@ -212,7 +212,8 @@ class StitchTiles:
                 "image_batch": ("IMAGE",),
                 "tiling_data": ("TILING_DATA",),
                 "feather_edges": ("BOOLEAN", {"default": True}),
-                # ✨ REMOVED: offset_x and offset_y are no longer needed
+                "offset_x": ("INT", {"default": 0, "min": -2048, "max": 2048, "step": 1}),
+                "offset_y": ("INT", {"default": 0, "min": -2048, "max": 2048, "step": 1}),
             },
         }
 
@@ -220,8 +221,8 @@ class StitchTiles:
     FUNCTION = "untile_images"
     CATEGORY = CATEGORY + "/upscale"
 
-    # ✨ UPDATED: Method signature changed to remove offsets
-    def untile_images(self, image_batch: torch.Tensor, tiling_data: dict, feather_edges: bool):
+    def untile_images(self, image_batch: torch.Tensor, tiling_data: dict, feather_edges: bool, offset_x: int,
+                      offset_y: int):
         # --- 1. Unpack data and get dimensions ---
         rows = tiling_data["rows"]
         cols = tiling_data["columns"]
@@ -235,54 +236,36 @@ class StitchTiles:
                 f"Number of images in batch ({num_tiles}) does not match rows*cols ({rows * cols}) from tiling_data.")
 
         incoming_h, incoming_w = image_batch.shape[1:3]
-
-        # --- ✨ NEW: Aspect Ratio Correction Logic ---
-        original_tile_w = tiling_data.get("original_tile_width")
-        original_tile_h = tiling_data.get("original_tile_height")
-
-        if original_tile_w and original_tile_h and original_tile_h > 0:
-            original_aspect_ratio = original_tile_w / original_tile_h
-            incoming_aspect_ratio = incoming_w / incoming_h
-
-            if abs(original_aspect_ratio - incoming_aspect_ratio) > 1e-4:
-                # Calculate new dimensions, minimizing the change
-                new_w_if_h_fixed = round(incoming_h * original_aspect_ratio)
-                new_h_if_w_fixed = round(incoming_w / original_aspect_ratio)
-
-                if abs(new_w_if_h_fixed - incoming_w) < abs(new_h_if_w_fixed - incoming_h):
-                    target_w, target_h = new_w_if_h_fixed, incoming_h
-                else:
-                    target_w, target_h = incoming_w, new_h_if_w_fixed
-
-                if target_w != incoming_w or target_h != incoming_h:
-                    print(
-                        f"StitchTiles: Correcting tile aspect ratio from {incoming_w}x{incoming_h} to {target_w}x{target_h}")
-                    # Use torch.nn.functional.interpolate for efficient resizing
-                    image_batch = image_batch.permute(0, 3, 1, 2)  # N, H, W, C -> N, C, H, W
-                    image_batch = F.interpolate(image_batch, size=(target_h, target_w), mode='bilinear',
-                                                align_corners=False)
-                    image_batch = image_batch.permute(0, 2, 3, 1)  # N, C, H, W -> N, H, W, C
-
-                # Update incoming dimensions for subsequent calculations
-                incoming_h, incoming_w = target_h, target_w
-
         print(f"StitchTiles: Received {num_tiles} tiles of size {incoming_w}x{incoming_h}.")
 
-        # --- 2. Calculate core, border, and step dimensions ---
+        # --- 2. Calculate core, border, and step dimensions of the upscaled tiles ---
         core_upscaled_w = round(incoming_w / (1 + overlap_percent_w))
         core_upscaled_h = round(incoming_h / (1 + overlap_percent_h))
         border_w = (incoming_w - core_upscaled_w) // 2
         border_h = (incoming_h - core_upscaled_h) // 2
 
-        # ✨ SIMPLIFIED: Step size is now just the core tile size
-        step_w = core_upscaled_w
-        step_h = core_upscaled_h
+        # The step size is the distance between the top-left corner of adjacent tiles.
+        # The offset adjusts this distance.
+        step_w = core_upscaled_w - offset_x
+        step_h = core_upscaled_h - offset_y
 
         # --- 3. Route to either feathered or non-feathered method ---
         if not feather_edges or not has_overlap:
-            # --- METHOD A: Hard-Edge Reconstruction (Simplified) ---
-            canvas_w = cols * step_w
-            canvas_h = rows * step_h
+            # --- METHOD A: Hard-Edge Reconstruction ---
+
+            # Calculate final canvas size and paste offsets to handle potential negative coordinates.
+            x_coords = [c * step_w for c in range(cols)]
+            y_coords = [r * step_h for r in range(rows)]
+
+            min_x = min(x_coords)
+            max_x = max(x_coords)
+            min_y = min(y_coords)
+            max_y = max(y_coords)
+
+            canvas_w = (max_x - min_x) + core_upscaled_w
+            canvas_h = (max_y - min_y) + core_upscaled_h
+            paste_offset_x = -min_x
+            paste_offset_y = -min_y
 
             final_image = Image.new('RGB', (canvas_w, canvas_h))
             tiles_pil = [Image.fromarray(np.clip(255. * i.cpu().numpy(), 0, 255).astype(np.uint8)) for i in image_batch]
@@ -292,51 +275,66 @@ class StitchTiles:
             for r in range(rows):
                 for c in range(cols):
                     core_tile = tiles_pil[tile_index].crop(crop_box)
-                    paste_position = (c * step_w, r * step_h)
+                    paste_position = (c * step_w + paste_offset_x, r * step_h + paste_offset_y)
                     final_image.paste(core_tile, paste_position)
                     tile_index += 1
 
             output_tensor = torch.from_numpy(np.array(final_image).astype(np.float32) / 255.0).unsqueeze(0)
 
         else:
-            # --- METHOD B: Feathered Blending Reconstruction (Simplified) ---
+            # --- METHOD B: Feathered Blending Reconstruction ---
+
+            # Create a 2D feathering mask (a window function)
             feather_mask = np.ones((incoming_h, incoming_w, 1), dtype=np.float32)
             if border_w > 0:
-                ramp_w = np.linspace(0.0, 1.0, border_w, dtype=np.float32)
+                ramp_w = np.linspace(0.0, 1.0, border_w)
                 feather_mask[:, :border_w, :] *= ramp_w.reshape(1, -1, 1)
                 feather_mask[:, -border_w:, :] *= np.flip(ramp_w).reshape(1, -1, 1)
             if border_h > 0:
-                ramp_h = np.linspace(0.0, 1.0, border_h, dtype=np.float32)
+                ramp_h = np.linspace(0.0, 1.0, border_h)
                 feather_mask[:border_h, :, :] *= ramp_h.reshape(-1, 1, 1)
                 feather_mask[-border_h:, :, :] *= np.flip(ramp_h).reshape(-1, 1, 1)
 
-            canvas_w = (cols - 1) * step_w + incoming_w
-            canvas_h = (rows - 1) * step_h + incoming_h
+            # Calculate canvas size and offsets to handle any negative coordinates from offsets
+            x_coords = [c * step_w for c in range(cols)]
+            y_coords = [r * step_h for r in range(rows)]
+            min_x, max_x = min(x_coords), max(x_coords)
+            min_y, max_y = min(y_coords), max(y_coords)
+
+            canvas_w = (max_x - min_x) + incoming_w
+            canvas_h = (max_y - min_y) + incoming_h
+            paste_offset_x = -min_x
+            paste_offset_y = -min_y
 
             final_image_np = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
             weight_map = np.zeros((canvas_h, canvas_w, 1), dtype=np.float32)
             tiles_np = image_batch.cpu().numpy()
 
+            # Iterate, apply mask, and accumulate values and weights
             tile_index = 0
             for r in range(rows):
                 for c in range(cols):
-                    y_start = r * step_h
-                    x_start = c * step_w
+                    y_start = r * step_h + paste_offset_y
+                    x_start = c * step_w + paste_offset_x
                     final_image_np[y_start:y_start + incoming_h, x_start:x_start + incoming_w] += tiles_np[
                                                                                                       tile_index] * feather_mask
                     weight_map[y_start:y_start + incoming_h, x_start:x_start + incoming_w] += feather_mask
                     tile_index += 1
 
+            # Normalize the image by dividing by the accumulated weights
             weight_map[weight_map == 0] = 1.0
             final_image_np /= weight_map
 
-            target_w = cols * core_upscaled_w
-            target_h = rows * core_upscaled_h
-            crop_start_x = border_w
-            crop_start_y = border_h
-            final_image_np = final_image_np[crop_start_y:crop_start_y + target_h,
-            crop_start_x:crop_start_x + target_w]
+            # Crop the final image to the target size
+            target_w = (max_x - min_x) + core_upscaled_w
+            target_h = (max_y - min_y) + core_upscaled_h
 
+            crop_start_x = paste_offset_x + border_w
+            crop_start_y = paste_offset_y + border_h
+
+            final_image_np = final_image_np[crop_start_y:crop_start_y + target_h, crop_start_x:crop_start_x + target_w]
+
+            # Clip and convert to tensor
             final_image_np = np.clip(final_image_np, 0.0, 1.0)
             output_tensor = torch.from_numpy(final_image_np).unsqueeze(0)
 
