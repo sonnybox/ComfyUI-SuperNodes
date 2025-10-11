@@ -1,17 +1,20 @@
 # Import both node classes from our logic files
-from .main import SuperCreateTiles
-from .main import SuperUntile
+from .main import CreateTiles
+from .main import StitchTiles
+from .main import CalculateUpscaleTiles
 
 # A dictionary that maps the node's internal name to its class
 NODE_CLASS_MAPPINGS = {
-    "SuperCreateTiles": SuperCreateTiles,
-    "SuperUntile": SuperUntile,
+    "SuperCreateTiles": CreateTiles,
+    "SuperStitchTiles": StitchTiles,
+    "SuperCalculateTiles": CalculateUpscaleTiles
 }
 
 # A dictionary that maps the node's internal name to its display name in the UI
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "SuperCreateTiles": "🐧 Super Create Tiles",
-    "SuperUntile": "🐧 Super Untile",
+    "SuperCreateTiles": "🐧 Create Tiles",
+    "SuperStitchTiles": "🐧 Stitch Tiles",
+    "SuperCalculateTiles": "🐧 Calculate Upscale Tiles",
 }
 
 # A print statement to show when the nodes are loaded
