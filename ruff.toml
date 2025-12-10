@@ -1,0 +1,17 @@
+# General settings
+line-length = 80
+indent-width = 4
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[lint.isort]
+combine-as-imports = true
+force-sort-within-sections = true

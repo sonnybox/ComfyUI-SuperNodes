@@ -1,0 +1,10 @@
+[tool.basedpyright]
+typeCheckingMode = "basic"
+reportUnusedVariable = false
+
+[project]
+name = "supernodes"
+description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
+version = "0.1.0"
+license = { file = "LICENSE" }
+dependencies = [""]
