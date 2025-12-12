@@ -1,10 +1,22 @@
-[tool.basedpyright]
-typeCheckingMode = "basic"
-reportUnusedVariable = false
-
 [project]
 name = "supernodes"
 description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
 version = "0.1.0"
-license = { file = "LICENSE" }
-dependencies = [""]
+license = {file = "LICENSE"} 
+
+[project.urls]
+Repository = "https://github.com/sonnybox/ComfyUI-SuperNodes"
+#  Used by Comfy Registry https://registry.comfy.org
+# Documentation = "https://github.com/sonnybox/ComfyUI-SuperNodes/wiki"
+# "Bug Tracker" = "https://github.com/sonnybox/ComfyUI-SuperNodes/issues"
+
+[tool.comfy]
+PublisherId = "sonnybox"
+DisplayName = "ComfyUI-SuperNodes"
+Icon = ""
+includes = [] 
+# "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
+
+[tool.basedpyright]
+typeCheckingMode = "basic"
+reportUnusedVariable = false
