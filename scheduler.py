@@ -32,7 +32,7 @@ class SigmaSmoother:
         }
 
     RETURN_TYPES = ("SIGMAS",)
-    RETURN_NAMES = ("sigmas",)
+    RETURN_NAMES = ("SIGMAS",)
     FUNCTION = "smooth_sigmas"
     CATEGORY = "SuperNodes"
     DESCRIPTION = "Inserts smoothed interpolation steps at the end of a sigma schedule before the final zero, useful for refining the final denoising steps."
@@ -64,12 +64,13 @@ class SigmaSmoother:
                 new_steps.append(new_val)
 
         elif interpolation_type == "decay":
-            # Decay interpolation: /2, /3, /4, etc.
-            # user example: 1 step -> last/2. 2 steps -> last/2, last/3
+            # Decay interpolation: previous / 2, then previous / 3, etc.
+            # Example: 3 -> 1.5 -> 0.5 -> 0.125
+            current_val = last_sigma
             for i in range(1, smooth_steps + 1):
                 divisor = i + 1
-                new_val = last_sigma / divisor
-                new_steps.append(new_val)
+                current_val = current_val / divisor
+                new_steps.append(current_val)
 
         # Convert new steps to tensor ensuring matching device and type
         new_sigmas_tensor = torch.tensor(

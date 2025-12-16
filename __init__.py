@@ -15,6 +15,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SigmaSmoother": "🐧 Sigma Smoother",
 }
 
-print("\033[34m[SuperNodes]\033[0m: Loaded Penguin Nodes.")
+print("\033[34m[SuperNodes]\033[0m: Loaded successfully.")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
