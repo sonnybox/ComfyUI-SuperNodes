@@ -13,7 +13,7 @@ Repository = "https://github.com/sonnybox/ComfyUI-SuperNodes"
 [tool.comfy]
 PublisherId = "sonnybox"
 DisplayName = "ComfyUI-SuperNodes"
-Icon = { file = "logo.png" }
+Icon = "https://raw.githubusercontent.com/sonnybox/ComfyUI-SuperNodes/refs/heads/main/logo.png"
 includes = [] 
 # "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
 
