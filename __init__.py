@@ -1,3 +1,4 @@
+from .qol import ImageSizeCalculator
 from .scheduler import SigmaSmoother, SigmasRescale
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
 
@@ -7,6 +8,7 @@ NODE_CLASS_MAPPINGS = {
     "SuperSVRCalcTiles": SeedVRCalculateTiles,
     "SigmaSmoother": SigmaSmoother,
     "SigmasRescale": SigmasRescale,
+    "ImageSizeCalculator": ImageSizeCalculator,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -15,6 +17,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SuperSVRCalcTiles": "🐧 SeedVR Calculate Tiles",
     "SigmaSmoother": "🐧 Sigma Smoother",
     "SigmasRescale": "🐧 Sigmas Rescale",
+    "ImageSizeCalculator": "🐧 Image Size Calculator",
 }
 
 print("\033[34m[SuperNodes]\033[0m Loaded successfully.")

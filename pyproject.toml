@@ -6,7 +6,7 @@ license = { file = "LICENSE" }
 
 [project.urls]
 Repository = "https://github.com/sonnybox/ComfyUI-SuperNodes"
-#  Used by Comfy Registry https://registry.comfy.org
+# Used by Comfy Registry https://registry.comfy.org
 # Documentation = "https://github.com/sonnybox/ComfyUI-SuperNodes/wiki"
 # "Bug Tracker" = "https://github.com/sonnybox/ComfyUI-SuperNodes/issues"
 
