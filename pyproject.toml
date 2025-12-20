@@ -1,5 +1,5 @@
 [project]
-name = "supernodes"
+name = "SuperNodes"
 description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
 version = "0.1.3"
 license = { file = "LICENSE" } 
