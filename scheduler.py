@@ -127,10 +127,10 @@ class SigmasRescale:
     OUTPUT_TOOLTIPS = ("The rescaled sigma schedule.",)
     FUNCTION = "rescale"
 
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "SuperNodes"
     DESCRIPTION = "Rescales a sigma schedule to a new maximum and minimum range while preserving the exact curve of the original schedule."
 
-    def rescale(self, sigmas, rescale_max, rescale_min):
+    def rescale(self, sigmas, max, min):
         # Avoid modifying the original tensor
         s = sigmas.clone()
 
@@ -142,7 +142,7 @@ class SigmasRescale:
         # Handle edge case where max equals min to avoid division by zero
         if current_max == current_min:
             # If the schedule is flat, return a flat schedule at the new max
-            return (torch.full_like(s, rescale_max),)
+            return (torch.full_like(s, max),)
 
         # Normalize the curve to 0.0 - 1.0
         # Formula: (value - min) / (max - min)
@@ -150,8 +150,6 @@ class SigmasRescale:
 
         # Scale to the new range
         # Formula: normalized * (new_max - new_min) + new_min
-        new_sigmas = (
-            normalized_curve * (rescale_max - rescale_min) + rescale_min
-        )
+        new_sigmas = normalized_curve * (max - min) + min
 
         return (new_sigmas,)
