@@ -3,23 +3,23 @@ import torch
 
 class WanExtendI2VPlus:
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(s):
         return {
             "required": {
                 "samples": (
                     "LATENT",
                     {
-                        "tooltip": "The output latent from the previous KSampler (the video you want to extend)."
+                        "tooltip": "The output latent from the previous KSampler."
                     },
                 ),
                 "context_frames": (
                     "INT",
                     {
                         "default": 16,
-                        "min": 4,
+                        "min": 1,
                         "max": 128,
-                        "step": 4,
-                        "tooltip": "Number of pixel frames to keep from the previous batch to use as context (overlap). Must be divisible by 4 (Wan default compression).",
+                        "step": 1,
+                        "tooltip": "Pixel frames to keep. Must match your VAE compression (e.g., 16 pixels = 4 latents).",
                     },
                 ),
                 "temporal_compression": (
@@ -29,7 +29,7 @@ class WanExtendI2VPlus:
                         "min": 1,
                         "max": 32,
                         "step": 1,
-                        "tooltip": "The temporal compression factor of the VAE. Wan/Video models usually compress 4 frames into 1 latent.",
+                        "tooltip": "Wan usually compresses 4 frames into 1 latent.",
                     },
                 ),
             }
@@ -37,68 +37,78 @@ class WanExtendI2VPlus:
 
     RETURN_TYPES = ("LATENT",)
     OUTPUT_TOOLTIPS = (
-        "The new latent batch prepared for the next KSampler step, with context frames masked.",
+        "The new latent batch with context frames 'locked' via a noise mask.",
     )
     FUNCTION = "extend_latent"
 
     CATEGORY = "Wan/latent"
-    DESCRIPTION = "Takes the last N frames from a latent batch, moves them to the front of a new empty batch, and creates a mask so only the new frames are generated. Allows infinite generation loops without VAE decoding."
+    DESCRIPTION = "Extends a video latent batch by copying the last N frames to the start of a new batch and masking them so they don't change."
 
     def extend_latent(self, samples, context_frames, temporal_compression=4):
-        # 1. Calculate Latent Dimensions
-        # Wan uses temporal compression (usually 4).
-        # If user asks for 16 pixel frames context, we need 16 / 4 = 4 latent frames.
-        context_latent_length = context_frames // temporal_compression
-
-        # Get the source latent tensor
-        # Shape is usually [Batch, Channels, T (Time), H, W]
         source_samples = samples["samples"]
-        batch, channels, total_frames, height, width = source_samples.shape
 
-        # 2. Validation
-        if context_latent_length >= total_frames:
+        # Calculate how many LATENT frames correspond to the requested PIXEL frames
+        # e.g., 16 pixel frames / 4 compression = 4 latent frames
+        ctx_lat_len = context_frames // temporal_compression
+
+        # --- SHAPE DETECTION ---
+        # 5D: [Batch, Channels, Time, Height, Width] (Native Video Format)
+        # 4D: [Batch, Channels, Height, Width] (Standard Comfy Format where Batch=Time)
+
+        is_5d = len(source_samples.shape) == 5
+
+        if is_5d:
+            b, c, t, h, w = source_samples.shape
+            total_len = t
+        else:
+            b, c, h, w = source_samples.shape
+            total_len = b
+
+        if ctx_lat_len >= total_len:
             raise ValueError(
-                f"Context frames ({context_frames}px / {context_latent_length}lat) cannot be larger than the input video length ({total_frames}lat)."
+                f"Context ({ctx_lat_len} latents) is larger than input video ({total_len} latents)."
             )
 
-        # 3. Create New Empty Latent Batch (Same size as input)
-        # We start with zeros (empty)
+        # --- CREATE NEW TENSOR ---
         new_samples = torch.zeros_like(source_samples)
 
-        # 4. Slice and Paste Context
-        # Grab the LAST 'context_latent_length' frames from the source
-        context_slice = source_samples[:, :, -context_latent_length:, :, :]
+        # --- SLICE & PASTE ---
+        if is_5d:
+            # Copy last N from source -> Paste to first N of new
+            # Shape: [Batch, Channel, TIME, Height, Width]
+            context_slice = source_samples[:, :, -ctx_lat_len:, :, :]
+            new_samples[:, :, :ctx_lat_len, :, :] = context_slice
 
-        # Paste them into the BEGINNING of the new batch
-        new_samples[:, :, :context_latent_length, :, :] = context_slice
+            # --- CREATE MASK (5D) ---
+            # Mask shape must be [Batch, 1, Time, Height, Width]
+            mask = torch.ones(
+                (b, 1, t, h, w),
+                dtype=source_samples.dtype,
+                device=source_samples.device,
+            )
+            mask[:, :, :ctx_lat_len, :, :] = 0.0  # Lock the context frames
 
-        # 5. Create the Noise Mask
-        # The mask tells the KSampler which pixels to denoise (1.0) and which to keep fixed (0.0).
-        # We need a mask of shape [1, T, H, W] (Channels dim is broadcasted usually, or handled by sampler)
+        else:
+            # Shape: [BATCH(Time), Channel, Height, Width]
+            context_slice = source_samples[-ctx_lat_len:, :, :, :]
+            new_samples[:ctx_lat_len, :, :, :] = context_slice
 
-        # Initialize mask with 1.0 (denoise everything / white)
-        # Note: SetLatentNoiseMask uses [Batch, 1, H, W] usually, but for video it's [Batch, 1, T, H, W] check?
-        # Standard ComfyUI masks in latents are often [Batch, 1, H, W] for images.
-        # For Video latents (5D), the mask should typically be 5D or broadcastable.
-        # We will create a [1, 1, T, H, W] mask to be safe.
+            # --- CREATE MASK (4D) ---
+            # Mask shape must be [Batch, 1, Height, Width]
+            mask = torch.ones(
+                (b, 1, h, w),
+                dtype=source_samples.dtype,
+                device=source_samples.device,
+            )
+            mask[:ctx_lat_len, :, :, :] = 0.0  # Lock the context frames
 
-        mask = torch.ones(
-            (1, 1, total_frames, height, width),
-            dtype=source_samples.dtype,
-            device=source_samples.device,
-        )
-
-        # Set the context area (frames 0 to context_length) to 0.0 (Block noise/Keep existing)
-        mask[:, :, :context_latent_length, :, :] = 0.0
-
-        # 6. Package Output
-        # We must clone the dictionary to avoid mutating the original input in the graph
+        # --- OUTPUT ---
         out = samples.copy()
         out["samples"] = new_samples
         out["noise_mask"] = mask
 
-        # Handle batch_index if it exists (standardize it for the new batch)
+        # Handle batch index for correct noise generation in some samplers
         if "batch_index" in out:
-            out["batch_index"] = [x for x in range(batch)]
+            out["batch_index"] = [x for x in range(source_samples.shape[0])]
 
         return (out,)
