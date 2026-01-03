@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-supernodes"
 description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
-version = "0.1.4"
+version = "0.1.5"
 license = { file = "LICENSE" } 
 
 [project.urls]
@@ -14,7 +14,8 @@ Repository = "https://github.com/sonnybox/ComfyUI-SuperNodes"
 PublisherId = "sonnybox"
 DisplayName = "ComfyUI-SuperNodes"
 Icon = "https://raw.githubusercontent.com/sonnybox/ComfyUI-SuperNodes/refs/heads/main/logo.png"
-includes = [] 
+includes = []
+dependencies  = ["numpy","pillow",]
 # "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
 
 [tool.basedpyright]

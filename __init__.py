@@ -1,8 +1,7 @@
 from .image import ImageMaskCrop, RestoreMaskCrop
 from .qol import ImageSizeCalculator
-from .scheduler import SigmaSmoother, SigmasRescale
+from .scheduler import SigmaSmoother, SigmasGraph, SigmasRescale, LoadDiffusersScheduler
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
-from .video import WanExtendI2VPlus
 
 NODE_CLASS_MAPPINGS = {
     "SuperCreateTiles": CreateTiles,
@@ -13,7 +12,8 @@ NODE_CLASS_MAPPINGS = {
     "ImageSizeCalculator": ImageSizeCalculator,
     "ImageMaskCrop": ImageMaskCrop,
     "RestoreMaskCrop": RestoreMaskCrop,
-    "WanExtendI2VPlus": WanExtendI2VPlus,
+    "LoadDiffusersScheduler": LoadDiffusersScheduler,
+    "SigmasGraph": SigmasGraph,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -25,9 +25,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageSizeCalculator": "🐧 Image Size Calculator",
     "ImageMaskCrop": "🐧 Image Mask Crop",
     "RestoreMaskCrop": "🐧 Restore Mask Crop",
-    "WanExtendI2VPlus": "🐧 Wan Extend I2V+",
+    "LoadDiffusersScheduler": "🐧 Load Diffusers Scheduler",
+    "SigmasGraph": "🐧 Sigmas Graph",
 }
 
-print("\033[34m[SuperNodes]\033[0m Loaded successfully.")
+print("\033[34m[SuperNodes]\033[0m Classes initialized.")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

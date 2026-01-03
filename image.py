@@ -217,9 +217,9 @@ class RestoreMaskCrop:
         def resize_tensor(tensor, width, height, method, is_mask=False):
             """
             Optimized resizing using torch.interpolate where possible,
-            falling back to PIL for unsupported methods (e.g. Lanczos).
+            falling back to PIL for unsupported methods (Lanczos).
             """
-            # Fallback to PIL for Lanczos
+            # Use PIL for Lanczos
             if method == "lanczos":
                 return pil_resize_fallback(
                     tensor, width, height, method, is_mask
@@ -335,7 +335,7 @@ class RestoreMaskCrop:
 
         elif strategy == "scale_original":
             # Calculate scale factor based on the difference between the NEW crop width and the OLD crop width
-            # This ensures the original image scales proportionally to how the crop was scaled
+            # This causes the original image to scale proportionally to how the crop was scaled
             scale_factor = cropped_image.shape[2] / orig_w
 
             # New dimensions for the full original image
