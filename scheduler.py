@@ -4,7 +4,7 @@ import os
 import random
 import diffusers
 import torch
-import folder_paths
+import folder_paths # type: ignore
 import numpy as np
 import matplotlib.pyplot as plt
 import io

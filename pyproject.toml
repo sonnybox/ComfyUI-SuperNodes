@@ -15,7 +15,7 @@ PublisherId = "sonnybox"
 DisplayName = "ComfyUI-SuperNodes"
 Icon = "https://raw.githubusercontent.com/sonnybox/ComfyUI-SuperNodes/refs/heads/main/logo.png"
 includes = []
-dependencies  = ["numpy","pillow",]
+dependencies  = ["numpy", "pillow", "torch", "diffusers", "matplotlib"]
 # "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
 
 [tool.basedpyright]
