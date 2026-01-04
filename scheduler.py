@@ -1,8 +1,5 @@
-import json
-import math
 import os
 import random
-import diffusers
 import torch
 import folder_paths # type: ignore
 import numpy as np
@@ -163,107 +160,6 @@ class SigmasRescale:
         new_sigmas = normalized_curve * (max - min) + min
 
         return (new_sigmas,)
-
-
-class LoadDiffusersScheduler:
-    @classmethod
-    def INPUT_TYPES(s):
-        scheduler_type = "scheduler"
-        default_scheduler_path = os.path.join(folder_paths.models_dir, scheduler_type)
-        folder_paths.add_model_folder_path(scheduler_type, default_scheduler_path)
-        paths, current_exts = folder_paths.folder_names_and_paths[scheduler_type]
-        if ".json" not in current_exts:
-            folder_paths.folder_names_and_paths[scheduler_type] = (paths, current_exts | {".json"})
-
-        return {
-            "required": {
-                # Now we use the standard get_filename_list with our new key
-                "scheduler_name": (folder_paths.get_filename_list(scheduler_type), {"tooltip": "Select a diffusers scheduler JSON config file from 'models/scheduler'."}),
-                "steps": ("INT", {"default": 20, "min": 1, "max": 10000, "tooltip": "The number of steps for the schedule."}),
-                "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of denoising to apply."}),
-            },
-            "optional": {
-                "width": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8, "tooltip": "Used for 'dynamic shifting' calculations."}),
-                "height": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 8, "tooltip": "Used for 'dynamic shifting' calculations."}),
-            }
-        }
-
-    RETURN_TYPES = ("SIGMAS",)
-    RETURN_NAMES = ("SIGMAS",)
-    CATEGORY = "advanced/loaders"
-    FUNCTION = "load_scheduler"
-    DESCRIPTION = "Loads a scheduler from a Diffusers JSON config and generates a SIGMAS schedule."
-
-    def load_scheduler(self, scheduler_name, steps, denoise, width=1024, height=1024):
-        if diffusers is None:
-            raise ImportError("The 'diffusers' library is required to use this node. Please install it via pip.")
-
-        scheduler_type = "scheduler"
-        config_path = folder_paths.get_full_path(scheduler_type, scheduler_name)
-        if config_path is None:
-            raise FileNotFoundError(f"Scheduler config '{scheduler_name}' not found.")
-
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-
-        class_name = config.get("_class_name", None)
-        scheduler_cls = getattr(diffusers, class_name, None)
-
-        # --- Dynamic Shifting Logic ---
-        if config.get("use_dynamic_shifting", False):
-            base_seq_len = config.get("base_image_seq_len", 256)
-            max_seq_len = config.get("max_image_seq_len", 4096)
-            base_shift = config.get("base_shift", 0.5)
-            max_shift = config.get("max_shift", 1.15)
-
-            # Calculate current image sequence length  
-            # latent size is pixel/16. Total tokens = (W/16 * H/16))
-            image_seq_len = (width // 16) * (height // 16)
-
-            m = image_seq_len
-            m1 = base_seq_len
-            m2 = max_seq_len
-
-            # Calculate mu
-            if m2 > m1:
-                mu = (m - m1) / (m2 - m1)
-            else:
-                mu = 0
-
-            mu = max(0.0, min(1.0, mu))
-            
-            # Calculate shift
-            shift = math.exp(math.log(base_shift) + mu * (math.log(max_shift) - math.log(base_shift)))
-            
-            config["shift"] = shift
-            # Disable dynamic shifting so the scheduler accepts our manual 'shift' value
-            config["use_dynamic_shifting"] = False
-
-        try:
-            scheduler = scheduler_cls.from_config(config)
-        except Exception as e:
-            raise RuntimeError(f"Failed to instantiate {class_name}: {e}")
-
-        # --- Calculate Sigmas ---
-        total_steps = steps
-        if denoise < 1.0 and denoise > 0.0:
-            total_steps = int(steps / denoise)
-        if denoise == 0.0:
-            total_steps = steps 
-            
-        scheduler.set_timesteps(total_steps)
-        
-        if hasattr(scheduler, "sigmas"):
-            sigmas = scheduler.sigmas
-        else:
-            raise AttributeError(f"Scheduler {class_name} does not expose 'sigmas'.")
-
-        if denoise < 1.0 and denoise > 0.0:
-            sigmas = sigmas[-(steps + 1):]
-            
-        sigmas = sigmas.clone().detach().cpu()
-        
-        return (sigmas,)
 
 
 class SigmasGraph:

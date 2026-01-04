@@ -1,5 +1,4 @@
 numpy
 pillow
 torch
-diffusers
 matplotlib

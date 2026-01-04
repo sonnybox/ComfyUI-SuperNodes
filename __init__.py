@@ -12,7 +12,6 @@ NODE_CLASS_MAPPINGS = {
     "ImageSizeCalculator": ImageSizeCalculator,
     "ImageMaskCrop": ImageMaskCrop,
     "RestoreMaskCrop": RestoreMaskCrop,
-    "LoadDiffusersScheduler": LoadDiffusersScheduler,
     "SigmasGraph": SigmasGraph,
 }
 
@@ -25,7 +24,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageSizeCalculator": "🐧 Image Size Calculator",
     "ImageMaskCrop": "🐧 Image Mask Crop",
     "RestoreMaskCrop": "🐧 Restore Mask Crop",
-    "LoadDiffusersScheduler": "🐧 Load Diffusers Scheduler",
     "SigmasGraph": "🐧 Sigmas Graph",
 }
 
