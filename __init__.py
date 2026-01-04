@@ -1,6 +1,6 @@
 from .image import ImageMaskCrop, RestoreMaskCrop
 from .qol import ImageSizeCalculator
-from .scheduler import SigmaSmoother, SigmasGraph, SigmasRescale, LoadDiffusersScheduler
+from .scheduler import SigmaSmoother, SigmasGraph, SigmasRescale
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
 
 NODE_CLASS_MAPPINGS = {
