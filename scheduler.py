@@ -199,23 +199,15 @@ class LoadDiffusersScheduler:
             raise ImportError("The 'diffusers' library is required to use this node. Please install it via pip.")
 
         scheduler_type = "scheduler"
-
         config_path = folder_paths.get_full_path(scheduler_type, scheduler_name)
-        
         if config_path is None:
-            raise FileNotFoundError(f"Scheduler config '{scheduler_name}' not found. Please ensure it is in 'models/scheduler' or defined in extra_model_paths.yaml.")
+            raise FileNotFoundError(f"Scheduler config '{scheduler_name}' not found.")
 
-        # Load JSON config
         with open(config_path, 'r') as f:
             config = json.load(f)
 
         class_name = config.get("_class_name", None)
-        if not class_name:
-            raise ValueError("Invalid scheduler JSON: missing '_class_name'.")
-
         scheduler_cls = getattr(diffusers, class_name, None)
-        if scheduler_cls is None:
-            raise ImportError(f"Scheduler class '{class_name}' not found in diffusers library.")
 
         # --- Dynamic Shifting Logic ---
         if config.get("use_dynamic_shifting", False):
@@ -223,28 +215,30 @@ class LoadDiffusersScheduler:
             max_seq_len = config.get("max_image_seq_len", 4096)
             base_shift = config.get("base_shift", 0.5)
             max_shift = config.get("max_shift", 1.15)
-            
+
+            # Calculate current image sequence length  
+            # latent size is pixel/16. Total tokens = (W/16 * H/16))
             image_seq_len = (width // 16) * (height // 16)
-            
+
             m = image_seq_len
-            m1 = base_seq_len ** 2
-            m2 = max_seq_len ** 2
-            
-            # Clamp mu between 0 and 1
+            m1 = base_seq_len
+            m2 = max_seq_len
+
+            # Calculate mu
             if m2 > m1:
                 mu = (m - m1) / (m2 - m1)
             else:
                 mu = 0
-            
+
             mu = max(0.0, min(1.0, mu))
+            
+            # Calculate shift
             shift = math.exp(math.log(base_shift) + mu * (math.log(max_shift) - math.log(base_shift)))
             
             config["shift"] = shift
-            
-            # Disable dynamic shifting in the config since we just manually applied it.
+            # Disable dynamic shifting so the scheduler accepts our manual 'shift' value
             config["use_dynamic_shifting"] = False
 
-        # Instantiate Scheduler
         try:
             scheduler = scheduler_cls.from_config(config)
         except Exception as e:
@@ -264,11 +258,9 @@ class LoadDiffusersScheduler:
         else:
             raise AttributeError(f"Scheduler {class_name} does not expose 'sigmas'.")
 
-        # Truncate if denoise was used
         if denoise < 1.0 and denoise > 0.0:
             sigmas = sigmas[-(steps + 1):]
             
-        # Ensure it's a CPU tensor for ComfyUI
         sigmas = sigmas.clone().detach().cpu()
         
         return (sigmas,)
