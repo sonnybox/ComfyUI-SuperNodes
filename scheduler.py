@@ -240,6 +240,9 @@ class LoadDiffusersScheduler:
             shift = math.exp(math.log(base_shift) + mu * (math.log(max_shift) - math.log(base_shift)))
             
             config["shift"] = shift
+            
+            # Disable dynamic shifting in the config since we just manually applied it.
+            config["use_dynamic_shifting"] = False
 
         # Instantiate Scheduler
         try:
