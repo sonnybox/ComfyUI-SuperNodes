@@ -232,6 +232,7 @@ class FaceBBoxToMask:
         return {
             "required": {
                 # Corresponds to the 'face_bboxes' output from PoseAndFaceDetection
+                # from Kijai's WanAnimatePreprocess nodes.
                 "face_bboxes": ("BBOX",),
                 # Required to determine the resolution and batch size of the mask
                 "images": ("IMAGE",),
@@ -239,7 +240,7 @@ class FaceBBoxToMask:
         }
 
     RETURN_TYPES = ("MASK",)
-    RETURN_NAMES = ("mask",)
+    RETURN_NAMES = ("MASK",)
     FUNCTION = "process"
     CATEGORY = "SuperNodes/Utils"
     DESCRIPTION = "Converts face bounding boxes into a mask batch. Compatible with WanAnimatePreprocess."
