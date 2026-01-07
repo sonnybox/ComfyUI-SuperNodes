@@ -1,4 +1,5 @@
 import comfy.utils  # type: ignore
+import torch
 
 
 class ImageSizeCalculator:
@@ -225,5 +226,49 @@ class SuperResizeImage:
         return (working_image[:, y1:y2, x1:x2, :],)
 
 
-NODE_CLASS_MAPPINGS = {"SuperResizeImage": SuperResizeImage}
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperResizeImage": "Resize Image (Super)"}
+class FaceBBoxToMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                # Corresponds to the 'face_bboxes' output from PoseAndFaceDetection
+                "face_bboxes": ("BBOX",),
+                # Required to determine the resolution and batch size of the mask
+                "images": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "process"
+    CATEGORY = "SuperNodes/Utils"
+    DESCRIPTION = "Converts face bounding boxes into a mask batch. Compatible with WanAnimatePreprocess."
+
+    def process(self, face_bboxes, images):
+        # images shape: [Batch, Height, Width, Channels]
+        batch_size, height, width, _ = images.shape
+
+        # Initialize zero masks (black)
+        masks = torch.zeros((batch_size, height, width), dtype=torch.float32)
+
+        # Iterate through the bounding boxes and set the corresponding region to 1.0 (white)
+        # We use min() to ensure we don't go out of bounds if lists don't match
+        for i in range(min(batch_size, len(face_bboxes))):
+            bbox = face_bboxes[i]
+            if bbox is None:
+                continue
+
+            # Unpack bounding box (x1, y1, x2, y2)
+            x1, y1, x2, y2 = bbox
+
+            # Convert to integers and clip to image dimensions to avoid errors
+            x1 = max(0, int(x1))
+            y1 = max(0, int(y1))
+            x2 = min(width, int(x2))
+            y2 = min(height, int(y2))
+
+            # Apply to mask if the box has valid area
+            if x2 > x1 and y2 > y1:
+                masks[i, y1:y2, x1:x2] = 1.0
+
+        return (masks,)

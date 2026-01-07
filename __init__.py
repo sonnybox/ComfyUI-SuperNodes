@@ -1,5 +1,5 @@
 from .image import ImageMaskCrop, RestoreMaskCrop
-from .qol import ImageSizeCalculator, SuperResizeImage
+from .qol import FaceBBoxToMask, ImageSizeCalculator, SuperResizeImage
 from .scheduler import SigmasGraph, SigmaSmoother, SigmasRescale
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
 
@@ -14,6 +14,7 @@ NODE_CLASS_MAPPINGS = {
     "ImageMaskCrop": ImageMaskCrop,
     "RestoreMaskCrop": RestoreMaskCrop,
     "SigmasGraph": SigmasGraph,
+    "FaceBBoxToMask": FaceBBoxToMask,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -27,6 +28,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageMaskCrop": "🐧 Image Mask Crop",
     "RestoreMaskCrop": "🐧 Restore Mask Crop",
     "SigmasGraph": "🐧 Sigmas Graph",
+    "FaceBBoxToMask": "🐧 Face BBox Masks",
 }
 
 print("\033[34m[SuperNodes]\033[0m Classes initialized.")
