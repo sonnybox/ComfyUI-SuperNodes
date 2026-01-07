@@ -1,11 +1,12 @@
+import io
 import os
 import random
-import torch
-import folder_paths # type: ignore
-import numpy as np
+
+import folder_paths  # type: ignore
 import matplotlib.pyplot as plt
-import io
+import numpy as np
 from PIL import Image
+import torch
 
 
 class SigmaSmoother:
@@ -41,7 +42,7 @@ class SigmaSmoother:
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("SIGMAS",)
     FUNCTION = "smooth_sigmas"
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Scheduling"
     DESCRIPTION = "Inserts smoothed interpolation steps at the end of a sigma schedule before the final zero, useful for refining the final denoising steps."
 
     def smooth_sigmas(self, sigmas, smooth_steps, interpolation_type):
@@ -134,7 +135,7 @@ class SigmasRescale:
     OUTPUT_TOOLTIPS = ("The rescaled sigma schedule.",)
     FUNCTION = "rescale"
 
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Scheduling"
     DESCRIPTION = "Rescales a sigma schedule to a new maximum and minimum range while preserving the exact curve of the original schedule."
 
     def rescale(self, sigmas, max, min):
@@ -167,14 +168,19 @@ class SigmasGraph:
         # Based on PreviewImage logic here to save to the temp directory
         self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
-        self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
+        self.prefix_append = "_temp_" + "".join(
+            random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5)
+        )
         self.compress_level = 1
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
-                "sigmas": ("SIGMAS", {"tooltip": "The sigma schedule tensor to visualize."}),
+                "sigmas": (
+                    "SIGMAS",
+                    {"tooltip": "The sigma schedule tensor to visualize."},
+                ),
             }
         }
 
@@ -182,7 +188,7 @@ class SigmasGraph:
     OUTPUT_NODE = True
     FUNCTION = "plot_sigmas"
 
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Scheduling"
     DESCRIPTION = "Generates a visual graph of the sigma decay schedule and displays it in the node."
 
     def plot_sigmas(self, sigmas):
@@ -196,19 +202,21 @@ class SigmasGraph:
 
         # 2. Generate Plot
         plt.figure(figsize=(8, 7))
-        plt.plot(s_data, marker='o', linestyle='-', markersize=4, color='#1f77b4')
-        
+        plt.plot(
+            s_data, marker="o", linestyle="-", markersize=4, color="#1f77b4"
+        )
+
         steps = len(s_data) - 1 if len(s_data) > 0 else 0
         plt.title(f"Sigma Schedule ({steps} steps)")
         plt.xlabel("Step")
         plt.ylabel("Value")
-        plt.grid(True, which='both', linestyle='--', alpha=0.7)
+        plt.grid(True, which="both", linestyle="--", alpha=0.7)
         plt.legend()
         plt.tight_layout()
 
         # 3. Save Plot to Buffer
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        plt.savefig(buf, format="png", dpi=100)
         buf.seek(0)
         plt.close()
 
@@ -218,27 +226,41 @@ class SigmasGraph:
         image_tensor = torch.from_numpy(image_np).unsqueeze(0)
 
         # 5. Call internal save method to display in UI
-        ui_output = self.save_images(image_tensor, filename_prefix="SigmasGraph")
-        
+        ui_output = self.save_images(
+            image_tensor, filename_prefix="SigmasGraph"
+        )
+
         # Return both the UI dictionary and the image tensor
         return {"ui": ui_output["ui"], "result": (image_tensor,)}
 
     def save_images(self, images, filename_prefix="ComfyUI"):
         filename_prefix += self.prefix_append
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        full_output_folder, filename, counter, subfolder, filename_prefix = (
+            folder_paths.get_save_image_path(
+                filename_prefix,
+                self.output_dir,
+                images[0].shape[1],
+                images[0].shape[0],
+            )
+        )
         results = list()
-        for (batch_number, image) in enumerate(images):
-            i = 255. * image.cpu().numpy()
+        for batch_number, image in enumerate(images):
+            i = 255.0 * image.cpu().numpy()
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
 
-            filename_with_batch_num = filename.replace("%batch_num%", str(batch_number))
+            filename_with_batch_num = filename.replace(
+                "%batch_num%", str(batch_number)
+            )
             file = f"{filename_with_batch_num}_{counter:05}_.png"
-            img.save(os.path.join(full_output_folder, file), pnginfo=None, compress_level=self.compress_level)
-            results.append({
-                "filename": file,
-                "subfolder": subfolder,
-                "type": self.type
-            })
+            img.save(
+                os.path.join(full_output_folder, file),
+                pnginfo=None,
+                compress_level=self.compress_level,
+            )
+            results.append(
+                {"filename": file, "subfolder": subfolder, "type": self.type}
+            )
             counter += 1
 
-        return { "ui": { "images": results } }
+        return {"ui": {"images": results}}
+

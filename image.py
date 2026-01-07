@@ -49,7 +49,7 @@ class ImageMaskCrop:
         "Metadata containing coordinates and original size, required for restoration.",
     )
     FUNCTION = "crop"
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Utils"
     DESCRIPTION = "Crops an image based on a mask's bounding box, with optional padding and dimension constraints."
 
     def crop(self, image, mask, padding, multiple_of):
@@ -202,7 +202,7 @@ class RestoreMaskCrop:
         "The composite image with the crop restored to its original location.",
     )
     FUNCTION = "restore"
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Utils"
     DESCRIPTION = "Restores a cropped image back into the original image context, handling scaling and blending."
 
     def restore(

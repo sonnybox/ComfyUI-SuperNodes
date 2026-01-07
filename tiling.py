@@ -82,7 +82,7 @@ class CreateTiles:
     RETURN_TYPES = ("IMAGE", "STITCH_INFO")
     RETURN_NAMES = ("tiles", "stitch_info")
     FUNCTION = "execute"
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Tiling"
 
     def execute(self, image, rows, cols, overlap):
         # image shape: [B, H, W, C]
@@ -195,7 +195,7 @@ class StitchTiles:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "execute"
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Tiling"
 
     def execute(self, tiles, stitch_info):
         if tiles.shape[0] != len(stitch_info["tiles"]):
@@ -308,7 +308,7 @@ class SeedVRCalculateTiles:
     RETURN_TYPES = ("INT", "INT", "FLOAT")
     RETURN_NAMES = ("rows", "cols", "suggested_overlap")
     FUNCTION = "calculate"
-    CATEGORY = "SuperNodes"
+    CATEGORY = "SuperNodes/Tiling"
 
     def calculate(self, image, target_tile_size, upscale_by):
         batch_size, h_orig, w_orig, c = image.shape
@@ -355,7 +355,7 @@ class SeedVRCalculateTiles:
                 break
 
             # 4. If not, split.
-            # Strategy: Maintain squareness of the *tiles*.
+            # Strategy: Maintain squareness of the tiles.
             # Calculate aspect ratio of the potential new grid cells to see which split
             # brings us closer to 1:1 tile aspect ratio.
 
