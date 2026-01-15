@@ -40,7 +40,7 @@ class ImageSizeCalculator:
                         "min": 1,
                         "max": 32768,
                         "step": 1,
-                        "tooltip": "The target length for the dimension specified by dimension_mode.",
+                        "tooltip": "The target length for the dimension specified by dimension mode.",
                     },
                 ),
                 "multiple_of": (
@@ -231,11 +231,24 @@ class FaceBBoxToMask:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                # Corresponds to the 'face_bboxes' output from PoseAndFaceDetection
-                # from Kijai's WanAnimatePreprocess nodes.
                 "face_bboxes": ("BBOX",),
-                # Required to determine the resolution and batch size of the mask
                 "images": ("IMAGE",),
+                "extend_up": (
+                    "INT",
+                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                ),
+                "extend_down": (
+                    "INT",
+                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                ),
+                "extend_left": (
+                    "INT",
+                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                ),
+                "extend_right": (
+                    "INT",
+                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                ),
             }
         }
 
@@ -245,15 +258,20 @@ class FaceBBoxToMask:
     CATEGORY = "SuperNodes/Utils"
     DESCRIPTION = "Converts face bounding boxes into a mask batch. Compatible with WanAnimatePreprocess."
 
-    def process(self, face_bboxes, images):
+    def process(
+        self,
+        face_bboxes,
+        images,
+        extend_up,
+        extend_down,
+        extend_left,
+        extend_right,
+    ):
         # images shape: [Batch, Height, Width, Channels]
         batch_size, height, width, _ = images.shape
 
-        # Initialize zero masks (black)
         masks = torch.zeros((batch_size, height, width), dtype=torch.float32)
 
-        # Iterate through the bounding boxes and set the corresponding region to 1.0 (white)
-        # We use min() to ensure we don't go out of bounds if lists don't match
         for i in range(min(batch_size, len(face_bboxes))):
             bbox = face_bboxes[i]
             if bbox is None:
@@ -262,13 +280,18 @@ class FaceBBoxToMask:
             # Unpack bounding box (x1, y1, x2, y2)
             x1, y1, x2, y2 = bbox
 
-            # Convert to integers and clip to image dimensions to avoid errors
-            x1 = max(0, int(x1))
-            y1 = max(0, int(y1))
-            x2 = min(width, int(x2))
-            y2 = min(height, int(y2))
+            # Apply directional expansion (note: "up" means smaller y1)
+            x1 = int(x1) - int(extend_left)
+            x2 = int(x2) + int(extend_right)
+            y1 = int(y1) - int(extend_up)
+            y2 = int(y2) + int(extend_down)
 
-            # Apply to mask if the box has valid area
+            # Clip to image bounds
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(width, x2)
+            y2 = min(height, y2)
+
             if x2 > x1 and y2 > y1:
                 masks[i, y1:y2, x1:x2] = 1.0
 
