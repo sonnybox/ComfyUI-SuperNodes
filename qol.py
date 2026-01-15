@@ -233,21 +233,21 @@ class FaceBBoxToMask:
             "required": {
                 "face_bboxes": ("BBOX",),
                 "images": ("IMAGE",),
-                "extend_up": (
+                "extend_up_percent": (
                     "INT",
-                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                    {"default": 0, "min": -100, "max": 500, "step": 1},
                 ),
-                "extend_down": (
+                "extend_down_percent": (
                     "INT",
-                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                    {"default": 0, "min": -100, "max": 500, "step": 1},
                 ),
-                "extend_left": (
+                "extend_left_percent": (
                     "INT",
-                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                    {"default": 0, "min": -100, "max": 500, "step": 1},
                 ),
-                "extend_right": (
+                "extend_right_percent": (
                     "INT",
-                    {"default": 0, "min": -16384, "max": 16384, "step": 1},
+                    {"default": 0, "min": -100, "max": 500, "step": 1},
                 ),
             }
         }
@@ -256,20 +256,18 @@ class FaceBBoxToMask:
     RETURN_NAMES = ("MASK",)
     FUNCTION = "process"
     CATEGORY = "SuperNodes/Utils"
-    DESCRIPTION = "Converts face bounding boxes into a mask batch. Compatible with WanAnimatePreprocess."
+    DESCRIPTION = "Converts face bounding boxes into a mask batch, with percent-based directional extension."
 
     def process(
         self,
         face_bboxes,
         images,
-        extend_up,
-        extend_down,
-        extend_left,
-        extend_right,
+        extend_up_percent,
+        extend_down_percent,
+        extend_left_percent,
+        extend_right_percent,
     ):
-        # images shape: [Batch, Height, Width, Channels]
         batch_size, height, width, _ = images.shape
-
         masks = torch.zeros((batch_size, height, width), dtype=torch.float32)
 
         for i in range(min(batch_size, len(face_bboxes))):
@@ -277,16 +275,23 @@ class FaceBBoxToMask:
             if bbox is None:
                 continue
 
-            # Unpack bounding box (x1, y1, x2, y2)
             x1, y1, x2, y2 = bbox
+            bw = float(x2 - x1)
+            bh = float(y2 - y1)
 
-            # Apply directional expansion (note: "up" means smaller y1)
-            x1 = int(x1) - int(extend_left)
-            x2 = int(x2) + int(extend_right)
-            y1 = int(y1) - int(extend_up)
-            y2 = int(y2) + int(extend_down)
+            if bw <= 1 or bh <= 1:
+                continue
 
-            # Clip to image bounds
+            up_px = int(round(bh * (extend_up_percent / 100.0)))
+            down_px = int(round(bh * (extend_down_percent / 100.0)))
+            left_px = int(round(bw * (extend_left_percent / 100.0)))
+            right_px = int(round(bw * (extend_right_percent / 100.0)))
+
+            x1 = int(round(x1)) - left_px
+            x2 = int(round(x2)) + right_px
+            y1 = int(round(y1)) - up_px
+            y2 = int(round(y2)) + down_px
+
             x1 = max(0, x1)
             y1 = max(0, y1)
             x2 = min(width, x2)
