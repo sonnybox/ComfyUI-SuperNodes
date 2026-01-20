@@ -255,65 +255,74 @@ class SuperResizeImage:
                 "SuperResizeImage: You must provide either an image or a mask."
             )
 
-        def make_multiple(value, m):
+        def make_multiple_round(value, m):
             return max(m, round(value / m) * m)
 
-        # 1. Determine Original Dimensions from available input
+        def make_multiple_floor(value, m):
+            return max(m, (int(value) // m) * m)
+
+        # 1) Determine original dims
         if image is not None:
             B, H_orig, W_orig, C = image.shape
         else:
-            # Mask is usually (B, H, W), ensure we handle it correctly
             if mask.dim() == 2:
-                mask = mask.unsqueeze(0)
+                mask = mask.unsqueeze(0)  # -> (1,H,W)
+            elif mask.dim() == 4 and mask.shape[1] == 1:
+                # If something upstream handed (B,1,H,W), normalize to (B,H,W)
+                mask = mask.squeeze(1)
             B, H_orig, W_orig = mask.shape[0], mask.shape[1], mask.shape[2]
 
-        # 2. Calculate Target Dimensions
-        target_w = make_multiple(width, multiple_of)
-        target_h = make_multiple(height, multiple_of)
+        # 2) Target dims (for cover/stretch modes)
+        target_w = make_multiple_round(width, multiple_of)
+        target_h = make_multiple_round(height, multiple_of)
 
-        # 3. Helper for processing tensor resizing
+        # 3) Resizing helper
         def process_tensor(tensor_in, w, h, method, is_mask=False):
+            if tensor_in is None:
+                return None
+
             if is_mask:
-                # Mask needs to be (B, C, H, W) for common_upscale, usually input is (B, H, W)
-                # We unsqueeze to add C=1
-                samples = tensor_in.unsqueeze(1)
+                # Force nearest for masks to preserve edges (and avoid “mask drift”)
+                method = "nearest-exact"
+                samples = tensor_in.unsqueeze(1)  # (B,1,H,W)
             else:
-                # Image is (B, H, W, C) -> (B, C, H, W)
-                samples = tensor_in.movedim(-1, 1)
+                samples = tensor_in.movedim(-1, 1)  # (B,C,H,W)
 
             out = comfy.utils.common_upscale(samples, w, h, method, "disabled")
 
             if is_mask:
-                # Back to (B, H, W)
-                return out.squeeze(1)
+                out = out.squeeze(1)  # (B,H,W)
+                return out.clamp(0.0, 1.0)
             else:
-                # Back to (B, H, W, C)
-                return out.movedim(1, -1)
+                return out.movedim(1, -1)  # (B,H,W,C)
 
         # --- MODE 1: Stretch (No Aspect Ratio) ---
         if crop == "disabled":
             out_image = (
                 process_tensor(image, target_w, target_h, upscale_method, False)
                 if image is not None
-                else torch.zeros((B, target_h, target_w, 3))
+                else torch.zeros(
+                    (B, target_h, target_w, 3),
+                    device=mask.device if mask is not None else "cpu",
+                )
             )
             out_mask = (
                 process_tensor(mask, target_w, target_h, upscale_method, True)
                 if mask is not None
-                else torch.zeros((B, target_h, target_w))
+                else torch.zeros(
+                    (B, target_h, target_w),
+                    device=image.device if image is not None else "cpu",
+                )
             )
             return (out_image, out_mask)
 
-        # --- Prepare for Cropping Logic (Modes 2 & 3) ---
-
-        # Calculate resize geometry based on Cover vs Viewport
+        # --- MODE 2/3: Cropping modes ---
         if cover:
-            # Mode 2: Aspect-Fit then Crop (Cover)
+            # Aspect-cover resize to at least target size, then crop to target
             scale = max(target_w / W_orig, target_h / H_orig)
-            new_w = round(W_orig * scale)
-            new_h = round(H_orig * scale)
+            new_w = max(1, int(round(W_orig * scale)))
+            new_h = max(1, int(round(H_orig * scale)))
 
-            # Intermediate Resize
             working_image = (
                 process_tensor(image, new_w, new_h, upscale_method, False)
                 if image is not None
@@ -328,57 +337,62 @@ class SuperResizeImage:
             H_curr, W_curr = new_h, new_w
             final_w, final_h = target_w, target_h
         else:
-            # Mode 3: Direct Viewport Crop
-            final_w = width
-            final_h = height
+            # Viewport crop: literal window, anchored by crop position.
+            # IMPORTANT: never round UP to multiple here (can exceed source)
+            final_w = int(width)
+            final_h = int(height)
 
-            # If viewport is larger than image, scale the requested window down to fit
-            if final_w > W_orig or final_h > H_orig:
-                scale = min(W_orig / final_w, H_orig / final_h)
-                final_w = int(final_w * scale)
-                final_h = int(final_h * scale)
+            # If viewport larger than source, clamp it (don’t scale the source)
+            final_w = min(final_w, W_orig)
+            final_h = min(final_h, H_orig)
 
-            final_w = make_multiple(final_w, multiple_of)
-            final_h = make_multiple(final_h, multiple_of)
+            # Floor to multiple so we never exceed source again
+            final_w = min(W_orig, make_multiple_floor(final_w, multiple_of))
+            final_h = min(H_orig, make_multiple_floor(final_h, multiple_of))
 
             working_image = image
             working_mask = mask
             H_curr, W_curr = H_orig, W_orig
 
-        # --- Shared Anchor/Cropping Logic ---
+        # --- Anchor / crop coordinates (clamped) ---
+        max_y1 = max(0, H_curr - final_h)
+        max_x1 = max(0, W_curr - final_w)
 
-        # Vertical Anchor
         if "top" in crop:
             y1 = 0
         elif "bottom" in crop:
-            y1 = H_curr - final_h
-        else:  # center
-            y1 = (H_curr - final_h) // 2
+            y1 = max_y1
+        else:
+            y1 = max_y1 // 2
 
-        # Horizontal Anchor
         if "left" in crop:
             x1 = 0
         elif "right" in crop:
-            x1 = W_curr - final_w
-        else:  # center
-            x1 = (W_curr - final_w) // 2
+            x1 = max_x1
+        else:
+            x1 = max_x1 // 2
+
+        # Clamp just in case
+        y1 = max(0, min(y1, max_y1))
+        x1 = max(0, min(x1, max_x1))
 
         y2 = y1 + final_h
         x2 = x1 + final_w
 
-        # --- Apply Crop ---
-
+        # --- Apply crop ---
         if working_image is not None:
             out_image = working_image[:, y1:y2, x1:x2, :]
         else:
-            # Return blank image of target size if input was missing
-            out_image = torch.zeros((B, final_h, final_w, 3))
+            device = working_mask.device if working_mask is not None else "cpu"
+            out_image = torch.zeros((B, final_h, final_w, 3), device=device)
 
         if working_mask is not None:
             out_mask = working_mask[:, y1:y2, x1:x2]
         else:
-            # Return blank mask of target size if input was missing
-            out_mask = torch.zeros((B, final_h, final_w))
+            device = (
+                working_image.device if working_image is not None else "cpu"
+            )
+            out_mask = torch.zeros((B, final_h, final_w), device=device)
 
         return (out_image, out_mask)
 
