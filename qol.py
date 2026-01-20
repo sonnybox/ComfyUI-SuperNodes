@@ -106,7 +106,6 @@ class SuperResizeImage:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
                 "width": (
                     "INT",
                     {"default": 512, "min": 1, "max": 65536, "step": 1},
@@ -117,8 +116,8 @@ class SuperResizeImage:
                 ),
                 "crop": (
                     [
-                        "disabled",
                         "center",
+                        "disabled",
                         "left",
                         "right",
                         "top",
@@ -132,8 +131,8 @@ class SuperResizeImage:
                 "cover": (
                     "BOOLEAN",
                     {
-                        "default": False,
-                        "tooltip": "False (Viewport): Slices a literal chunk of pixels from the source. True (Cover): Resizes the image to fit the dimensions while preserving aspect ratio, then crops.",
+                        "default": True,
+                        "tooltip": "False: crops a literal chunk of pixels from the source. True: Resizes the image to fit the dimensions while preserving aspect ratio, then crops.",
                     },
                 ),
                 "upscale_method": (
@@ -143,51 +142,107 @@ class SuperResizeImage:
                     "INT",
                     {"default": 16, "min": 1, "max": 512, "step": 1},
                 ),
-            }
+            },
+            "optional": {
+                "image": ("IMAGE",),
+                "mask": ("MASK",),
+            },
         }
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "resize"
     CATEGORY = "SuperNodes"
 
     def resize(
-        self, image, width, height, crop, upscale_method, multiple_of, cover
+        self,
+        width,
+        height,
+        crop,
+        upscale_method,
+        multiple_of,
+        cover,
+        image=None,
+        mask=None,
     ):
+        if image is None and mask is None:
+            raise ValueError(
+                "SuperResizeImage: You must provide either an image or a mask."
+            )
+
         def make_multiple(value, m):
             return max(m, round(value / m) * m)
 
-        B, H_orig, W_orig, C = image.shape
+        # 1. Determine Original Dimensions from available input
+        if image is not None:
+            B, H_orig, W_orig, C = image.shape
+        else:
+            # Mask is usually (B, H, W), ensure we handle it correctly
+            if mask.dim() == 2:
+                mask = mask.unsqueeze(0)
+            B, H_orig, W_orig = mask.shape[0], mask.shape[1], mask.shape[2]
 
-        # Mode 1: Stretch (No Aspect Ratio)
+        # 2. Calculate Target Dimensions
+        target_w = make_multiple(width, multiple_of)
+        target_h = make_multiple(height, multiple_of)
+
+        # 3. Helper for processing tensor resizing
+        def process_tensor(tensor_in, w, h, method, is_mask=False):
+            if is_mask:
+                # Mask needs to be (B, C, H, W) for common_upscale, usually input is (B, H, W)
+                # We unsqueeze to add C=1
+                samples = tensor_in.unsqueeze(1)
+            else:
+                # Image is (B, H, W, C) -> (B, C, H, W)
+                samples = tensor_in.movedim(-1, 1)
+
+            out = comfy.utils.common_upscale(samples, w, h, method, "disabled")
+
+            if is_mask:
+                # Back to (B, H, W)
+                return out.squeeze(1)
+            else:
+                # Back to (B, H, W, C)
+                return out.movedim(1, -1)
+
+        # --- MODE 1: Stretch (No Aspect Ratio) ---
         if crop == "disabled":
-            target_w = make_multiple(width, multiple_of)
-            target_h = make_multiple(height, multiple_of)
-            samples = image.movedim(-1, 1)
-            out = comfy.utils.common_upscale(
-                samples, target_w, target_h, upscale_method, "disabled"
+            out_image = (
+                process_tensor(image, target_w, target_h, upscale_method, False)
+                if image is not None
+                else torch.zeros((B, target_h, target_w, 3))
             )
-            return (out.movedim(1, -1),)
+            out_mask = (
+                process_tensor(mask, target_w, target_h, upscale_method, True)
+                if mask is not None
+                else torch.zeros((B, target_h, target_w))
+            )
+            return (out_image, out_mask)
 
-        # Mode 2: Aspect-Fit then Crop (Cover)
+        # --- Prepare for Cropping Logic (Modes 2 & 3) ---
+
+        # Calculate resize geometry based on Cover vs Viewport
         if cover:
-            target_w = make_multiple(width, multiple_of)
-            target_h = make_multiple(height, multiple_of)
-
-            # Calculate scale to ensure target is covered
+            # Mode 2: Aspect-Fit then Crop (Cover)
             scale = max(target_w / W_orig, target_h / H_orig)
             new_w = round(W_orig * scale)
             new_h = round(H_orig * scale)
 
-            samples = image.movedim(-1, 1)
-            resized = comfy.utils.common_upscale(
-                samples, new_w, new_h, upscale_method, "disabled"
+            # Intermediate Resize
+            working_image = (
+                process_tensor(image, new_w, new_h, upscale_method, False)
+                if image is not None
+                else None
             )
-            working_image = resized.movedim(1, -1)
+            working_mask = (
+                process_tensor(mask, new_w, new_h, upscale_method, True)
+                if mask is not None
+                else None
+            )
+
             H_curr, W_curr = new_h, new_w
             final_w, final_h = target_w, target_h
-
-        # Mode 3: Direct Viewport Crop
         else:
+            # Mode 3: Direct Viewport Crop
             final_w = width
             final_h = height
 
@@ -201,10 +256,12 @@ class SuperResizeImage:
             final_h = make_multiple(final_h, multiple_of)
 
             working_image = image
+            working_mask = mask
             H_curr, W_curr = H_orig, W_orig
 
-        # Shared Anchor Coordinate Logic
-        # Vertical
+        # --- Shared Anchor/Cropping Logic ---
+
+        # Vertical Anchor
         if "top" in crop:
             y1 = 0
         elif "bottom" in crop:
@@ -212,7 +269,7 @@ class SuperResizeImage:
         else:  # center
             y1 = (H_curr - final_h) // 2
 
-        # Horizontal
+        # Horizontal Anchor
         if "left" in crop:
             x1 = 0
         elif "right" in crop:
@@ -223,7 +280,21 @@ class SuperResizeImage:
         y2 = y1 + final_h
         x2 = x1 + final_w
 
-        return (working_image[:, y1:y2, x1:x2, :],)
+        # --- Apply Crop ---
+
+        if working_image is not None:
+            out_image = working_image[:, y1:y2, x1:x2, :]
+        else:
+            # Return blank image of target size if input was missing
+            out_image = torch.zeros((B, final_h, final_w, 3))
+
+        if working_mask is not None:
+            out_mask = working_mask[:, y1:y2, x1:x2]
+        else:
+            # Return blank mask of target size if input was missing
+            out_mask = torch.zeros((B, final_h, final_w))
+
+        return (out_image, out_mask)
 
 
 class FaceBBoxToMask:
