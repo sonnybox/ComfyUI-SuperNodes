@@ -5,7 +5,7 @@ from .qol import (
     ImageSizeCalculator,
     SuperResizeImage,
 )
-from .scheduler import SigmasGraph, SigmaSmoother, SigmasRescale
+from .scheduler import SigmaReplace, SigmasGraph, SigmaSmoother, SigmasRescale
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
 
 NODE_CLASS_MAPPINGS = {
@@ -15,6 +15,7 @@ NODE_CLASS_MAPPINGS = {
     "SuperResizeImage": SuperResizeImage,
     "SigmaSmoother": SigmaSmoother,
     "SigmasRescale": SigmasRescale,
+    "SigmaReplace": SigmaReplace,
     "ImageSizeCalculator": ImageSizeCalculator,
     "ImageMaskCrop": ImageMaskCrop,
     "RestoreMaskCrop": RestoreMaskCrop,
@@ -29,6 +30,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SuperSVRCalcTiles": "🐧 SeedVR Calculate Tiles",
     "SigmaSmoother": "🐧 Sigma Smoother",
     "SigmasRescale": "🐧 Sigmas Rescale",
+    "SigmaReplace": "🐧 Sigma Replace",
     "SuperResizeImage": "🐧 Crop Resize Image",
     "ImageSizeCalculator": "🐧 Image Size Calculator",
     "ImageMaskCrop": "🐧 Image Mask Crop",
