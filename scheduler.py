@@ -290,7 +290,7 @@ class SigmaReplace:
                         "default": 1.0,
                         "min": 0.0,
                         "max": 10_000.0,
-                        "step": 0.1,
+                        "step": 0.01,
                         "tooltip": "New sigma value to replace at the given index.",
                     },
                 ),

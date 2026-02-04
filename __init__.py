@@ -3,6 +3,7 @@ from .qol import (
     FaceBBoxToMask,
     GetCommonAspectRatio,
     ImageSizeCalculator,
+    SetReserveVRAM,
     SuperResizeImage,
 )
 from .scheduler import SigmaReplace, SigmasGraph, SigmaSmoother, SigmasRescale
@@ -22,6 +23,7 @@ NODE_CLASS_MAPPINGS = {
     "SigmasGraph": SigmasGraph,
     "FaceBBoxToMask": FaceBBoxToMask,
     "GetCommonAspectRatio": GetCommonAspectRatio,
+    "SetReserveVRAM": SetReserveVRAM,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -38,6 +40,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SigmasGraph": "🐧 Sigmas Graph",
     "FaceBBoxToMask": "🐧 Face BBox Masks",
     "GetCommonAspectRatio": "🐧 Get Aspect Ratio",
+    "SetReserveVRAM": "🐧 Set Reserve VRAM",
 }
 
 print("\033[34m[SuperNodes]\033[0m Classes initialized.")
