@@ -171,6 +171,77 @@ _XYZ_TO_RGB = torch.tensor(
 )
 
 
+def _levels_normalize(
+    img: torch.Tensor,
+    low_pct: float = 0.5,
+    high_pct: float = 99.5,
+    per_channel: bool = False,
+):
+    """
+    Percentile-based levels normalization.
+
+    img: [B,H,W,3] float [0..1]
+    low_pct / high_pct: percentiles (0..100)
+    per_channel: if True, compute per RGB channel, else luminance-style joint
+    """
+
+    B = img.shape[0]
+    flat = img.view(B, -1, 3)
+
+    lo = low_pct / 100.0
+    hi = high_pct / 100.0
+
+    if per_channel:
+        lows = []
+        highs = []
+        for c in range(3):
+            chan = flat[..., c]
+            lows.append(torch.quantile(chan, lo, dim=1))
+            highs.append(torch.quantile(chan, hi, dim=1))
+        low = torch.stack(lows, dim=1)
+        high = torch.stack(highs, dim=1)
+    else:
+        # Use luminance-ish average for bounds
+        lum = flat.mean(dim=2)
+        low = torch.quantile(lum, lo, dim=1).unsqueeze(1).repeat(1, 3)
+        high = torch.quantile(lum, hi, dim=1).unsqueeze(1).repeat(1, 3)
+
+    low = low[:, None, None, :]
+    high = high[:, None, None, :]
+
+    out = (img - low) / torch.clamp(high - low, min=1e-6)
+    return _clamp01(out)
+
+
+class SuperLevelsNormalize:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "low_clip": (
+                    "FLOAT",
+                    {"default": 0.5, "min": 0.0, "max": 10.0, "step": 0.1},
+                ),
+                "high_clip": (
+                    "FLOAT",
+                    {"default": 99.5, "min": 90.0, "max": 100.0, "step": 0.1},
+                ),
+                "per_channel": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "apply"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def apply(self, image, low_clip=0.5, high_clip=99.5, per_channel=False):
+        out = _levels_normalize(
+            image, float(low_clip), float(high_clip), bool(per_channel)
+        )
+        return (out,)
+
+
 def _apply_white_balance_cat(
     img_srgb: torch.Tensor,
     temperature_k: float,
@@ -366,7 +437,7 @@ class SuperBrightnessContrast:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "apply"
-    CATEGORY = "SuperNodes/adjustment"
+    CATEGORY = "SuperNodes/Adjustment"
 
     def apply(self, image, brightness=1.0, contrast=1.0, gamma=1.0):
         return (
@@ -395,7 +466,7 @@ class SuperHueSaturation:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "apply"
-    CATEGORY = "SuperNodes/adjustment"
+    CATEGORY = "SuperNodes/Adjustment"
 
     def apply(self, image, saturation=1.0, hue_degrees=0.0):
         return (_apply_saturation_hue(image, saturation, hue_degrees),)
@@ -409,7 +480,7 @@ class SuperWhiteBalanceCAT:
                 "image": ("IMAGE",),
                 "temperature_k": (
                     "INT",
-                    {"default": 6500, "min": 1667, "max": 25000, "step": 50},
+                    {"default": 6500, "min": 1650, "max": 25000, "step": 50},
                 ),
                 "tint": (
                     "FLOAT",
@@ -420,7 +491,7 @@ class SuperWhiteBalanceCAT:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "apply"
-    CATEGORY = "SuperNodes/adjustment"
+    CATEGORY = "SuperNodes/Adjustment"
 
     def apply(self, image, temperature_k=6500, tint=0.0):
         out = _apply_white_balance_cat(image, float(temperature_k), float(tint))
@@ -466,7 +537,7 @@ class SuperColorAdjustAllInOne:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "apply"
-    CATEGORY = "SuperNodes/adjustment"
+    CATEGORY = "SuperNodes/Adjustment"
 
     def apply(
         self,

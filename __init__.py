@@ -2,6 +2,7 @@ from .adjustment import (
     SuperBrightnessContrast,
     SuperColorAdjustAllInOne,
     SuperHueSaturation,
+    SuperLevelsNormalize,
     SuperWhiteBalanceCAT,
 )
 from .image import ImageMaskCrop, RestoreMaskCrop
@@ -24,6 +25,7 @@ NODE_CLASS_MAPPINGS = {
     "SuperHueSaturation": SuperHueSaturation,
     "SuperWhiteBalanceCAT": SuperWhiteBalanceCAT,
     "SuperColorAdjustAllInOne": SuperColorAdjustAllInOne,
+    "SuperLevelsNormalize": SuperLevelsNormalize,
     "SigmaSmoother": SigmaSmoother,
     "SigmasRescale": SigmasRescale,
     "SigmaReplace": SigmaReplace,
@@ -44,6 +46,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SuperHueSaturation": "🐧 Adjust Hue Saturation",
     "SuperWhiteBalanceCAT": "🐧 Adjust White Balance",
     "SuperColorAdjustAllInOne": "🐧 Adjust Color AIO",
+    "SuperLevelsNormalize": "🐧 Normalize Levels",
     "SigmaSmoother": "🐧 Sigma Smoother",
     "SigmasRescale": "🐧 Sigmas Rescale",
     "SigmaReplace": "🐧 Sigma Replace",
