@@ -180,27 +180,3 @@ class SuperLatentStats:
     def run(self, latent, label="latent", top_k=12):
         x = _get_samples(latent)
         return (_latent_stats_string(x, name=str(label), top_k=int(top_k)),)
-
-
-class SuperLatentStatsPrint:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "latent": ("LATENT",),
-                "label": ("STRING", {"default": "latent"}),
-                "top_k": (
-                    "INT",
-                    {"default": 12, "min": 3, "max": 64, "step": 1},
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("LATENT",)
-    FUNCTION = "run"
-    CATEGORY = "SuperNodes/adjustment"
-
-    def run(self, latent, label="latent", top_k=12):
-        x = _get_samples(latent)
-        print(_latent_stats_string(x, name=str(label), top_k=int(top_k)))
-        return (latent,)

@@ -2,17 +2,11 @@ from .adjustment import (
     SuperBrightnessContrast,
     SuperColorAdjustAllInOne,
     SuperHueSaturation,
-    SuperLatentBrightnessContrast,
-    SuperLatentChroma,
-    SuperLatentColorAdjustAllInOne,
-    SuperLatentHueRotate,
-    SuperLatentLevelsNormalize,
     SuperLevelsNormalize,
     SuperWhiteBalanceCAT,
 )
 from .debug import (
     SuperLatentStats,
-    SuperLatentStatsPrint,
 )
 from .image import ImageMaskCrop, RestoreMaskCrop
 from .qol import (
@@ -35,11 +29,6 @@ NODE_CLASS_MAPPINGS = {
     "SuperWhiteBalanceCAT": SuperWhiteBalanceCAT,
     "SuperColorAdjustAllInOne": SuperColorAdjustAllInOne,
     "SuperLevelsNormalize": SuperLevelsNormalize,
-    "SuperLatentBrightnessContrast": SuperLatentBrightnessContrast,
-    "SuperLatentLevelsNormalize": SuperLatentLevelsNormalize,
-    "SuperLatentChroma": SuperLatentChroma,
-    "SuperLatentHueRotate": SuperLatentHueRotate,
-    "SuperLatentColorAdjustAllInOne": SuperLatentColorAdjustAllInOne,
     "SigmaSmoother": SigmaSmoother,
     "SigmasRescale": SigmasRescale,
     "SigmaReplace": SigmaReplace,
@@ -51,7 +40,6 @@ NODE_CLASS_MAPPINGS = {
     "GetCommonAspectRatio": GetCommonAspectRatio,
     "SetReserveVRAM": SetReserveVRAM,
     "SuperLatentStats": SuperLatentStats,
-    "SuperLatentStatsPrint": SuperLatentStatsPrint,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -63,11 +51,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SuperWhiteBalanceCAT": "🐧 Adjust White Balance",
     "SuperColorAdjustAllInOne": "🐧 Adjust Color AIO",
     "SuperLevelsNormalize": "🐧 Normalize Levels",
-    "SuperLatentBrightnessContrast": "🐧 Latent Adjust Basic",
-    "SuperLatentLevelsNormalize": "🐧 Latent Normalize Levels",
-    "SuperLatentChroma": "🐧 Latent Saturation",
-    "SuperLatentHueRotate": "🐧 Latent Hue Rotate",
-    "SuperLatentColorAdjustAllInOne": "🐧 Latent Adjust AIO",
     "SigmaSmoother": "🐧 Sigma Smoother",
     "SigmasRescale": "🐧 Sigmas Rescale",
     "SigmaReplace": "🐧 Sigma Replace",
@@ -80,7 +63,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GetCommonAspectRatio": "🐧 Get Aspect Ratio",
     "SetReserveVRAM": "🐧 Set Reserve VRAM",
     "SuperLatentStats": "🐧 Latent Stats",
-    "SuperLatentStatsPrint": "🐧 Latent Stats (Print)",
 }
 
 print("\033[34m[SuperNodes]\033[0m Classes initialized.")
