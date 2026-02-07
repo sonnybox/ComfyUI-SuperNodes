@@ -33,9 +33,9 @@ def _kelvin_to_xy_approx(k: float) -> tuple[float, float]:
     Practical approximation for CCT (Kelvin) -> CIE xy chromaticity.
     Good enough for a WB slider; not "scientific-grade", but stable and common in tooling.
 
-    Valid-ish range: 1667K..25000K (we clamp to that).
+    Valid-ish range: 1650K..25000K (we clamp to that).
     """
-    k = float(max(1667.0, min(25000.0, k)))
+    k = float(max(1650.0, min(25000.0, k)))
     t = k
 
     # x approximation
@@ -249,7 +249,7 @@ def _apply_white_balance_cat(
 ) -> torch.Tensor:
     """
     img_srgb: [B,H,W,3] float in [0..1], assumed sRGB-ish
-    temperature_k: 1667..25000 typical slider
+    temperature_k: 1650..25000 typical slider
     tint: -1..1 (green..magenta). Implemented as a small shift in CIE 1960 v.
     """
     device = img_srgb.device
@@ -526,7 +526,7 @@ class SuperColorAdjustAllInOne:
                 ),
                 "temperature_k": (
                     "INT",
-                    {"default": 6500, "min": 1667, "max": 25000, "step": 50},
+                    {"default": 6500, "min": 1650, "max": 25000, "step": 50},
                 ),
                 "tint": (
                     "FLOAT",

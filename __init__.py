@@ -12,6 +12,7 @@ from .qol import (
     ImageSizeCalculator,
     SetReserveVRAM,
     SuperResizeImage,
+    SuperVAEEncodeWithReference,
 )
 from .scheduler import SigmaReplace, SigmasGraph, SigmaSmoother, SigmasRescale
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
@@ -26,6 +27,7 @@ NODE_CLASS_MAPPINGS = {
     "SuperWhiteBalanceCAT": SuperWhiteBalanceCAT,
     "SuperColorAdjustAllInOne": SuperColorAdjustAllInOne,
     "SuperLevelsNormalize": SuperLevelsNormalize,
+    "SuperVAEEncodeWithReference": SuperVAEEncodeWithReference,
     "SigmaSmoother": SigmaSmoother,
     "SigmasRescale": SigmasRescale,
     "SigmaReplace": SigmaReplace,
@@ -47,6 +49,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SuperWhiteBalanceCAT": "🐧 Adjust White Balance",
     "SuperColorAdjustAllInOne": "🐧 Adjust Color AIO",
     "SuperLevelsNormalize": "🐧 Normalize Levels",
+    "SuperVAEEncodeWithReference": "🐧 Super VAE Encode",
     "SigmaSmoother": "🐧 Sigma Smoother",
     "SigmasRescale": "🐧 Sigmas Rescale",
     "SigmaReplace": "🐧 Sigma Replace",

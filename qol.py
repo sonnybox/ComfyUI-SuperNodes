@@ -498,3 +498,35 @@ class FaceBBoxToMask:
                 masks[i, y1:y2, x1:x2] = 1.0
 
         return (masks,)
+
+
+class SuperVAEEncodeWithReference:
+    """
+    Encodes pixels with a VAE but preserves the reference LATENT dict metadata
+    (downscale_ratio_spacial, latent_format keys, noise_mask, batch_index, etc).
+    Useful for models with nonstandard latent formats (e.g. Flux variants).
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "pixels": ("IMAGE",),
+                "vae": ("VAE",),
+                "reference_latent": ("LATENT",),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "encode"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def encode(self, pixels, vae, reference_latent):
+        # Encode using the provided VAE
+        encoded = vae.encode(pixels)
+
+        # Preserve all metadata from the reference latent dict
+        out = reference_latent.copy()
+        out["samples"] = encoded
+
+        return (out,)
