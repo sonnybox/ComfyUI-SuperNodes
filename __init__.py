@@ -11,7 +11,6 @@ from .adjustment import (
     SuperWhiteBalanceCAT,
 )
 from .debug import (
-    SuperLatentDeltaStats,
     SuperLatentStats,
     SuperLatentStatsPrint,
 )
@@ -53,7 +52,6 @@ NODE_CLASS_MAPPINGS = {
     "SetReserveVRAM": SetReserveVRAM,
     "SuperLatentStats": SuperLatentStats,
     "SuperLatentStatsPrint": SuperLatentStatsPrint,
-    "SuperLatentDeltaStats": SuperLatentDeltaStats,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -83,7 +81,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SetReserveVRAM": "🐧 Set Reserve VRAM",
     "SuperLatentStats": "🐧 Latent Stats",
     "SuperLatentStatsPrint": "🐧 Latent Stats (Print)",
-    "SuperLatentDeltaStats": "🐧 Latent Delta Stats",
 }
 
 print("\033[34m[SuperNodes]\033[0m Classes initialized.")
