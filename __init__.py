@@ -1,3 +1,9 @@
+from .adjustment import (
+    SuperBrightnessContrast,
+    SuperColorAdjustAllInOne,
+    SuperHueSaturation,
+    SuperWhiteBalanceCAT,
+)
 from .image import ImageMaskCrop, RestoreMaskCrop
 from .qol import (
     FaceBBoxToMask,
@@ -14,6 +20,10 @@ NODE_CLASS_MAPPINGS = {
     "SuperStitchTiles": StitchTiles,
     "SuperSVRCalcTiles": SeedVRCalculateTiles,
     "SuperResizeImage": SuperResizeImage,
+    "SuperBrightnessContrast": SuperBrightnessContrast,
+    "SuperHueSaturation": SuperHueSaturation,
+    "SuperWhiteBalanceCAT": SuperWhiteBalanceCAT,
+    "SuperColorAdjustAllInOne": SuperColorAdjustAllInOne,
     "SigmaSmoother": SigmaSmoother,
     "SigmasRescale": SigmasRescale,
     "SigmaReplace": SigmaReplace,
@@ -30,6 +40,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SuperCreateTiles": "🐧 Create Tiles",
     "SuperStitchTiles": "🐧 Stitch Tiles",
     "SuperSVRCalcTiles": "🐧 SeedVR Calculate Tiles",
+    "SuperBrightnessContrast": "🐧 Adjust Brightness Contrast Gamma",
+    "SuperHueSaturation": "🐧 Adjust Hue Saturation",
+    "SuperWhiteBalanceCAT": "🐧 Adjust White Balance",
+    "SuperColorAdjustAllInOne": "🐧 Adjust Color AIO",
     "SigmaSmoother": "🐧 Sigma Smoother",
     "SigmasRescale": "🐧 Sigmas Rescale",
     "SigmaReplace": "🐧 Sigma Replace",
