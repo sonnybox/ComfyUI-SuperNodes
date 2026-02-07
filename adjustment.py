@@ -213,6 +213,322 @@ def _levels_normalize(
     return _clamp01(out)
 
 
+def _get_samples(latent: dict) -> torch.Tensor:
+    x = latent["samples"]
+    # Some comfy ops may produce nested tensors; unwrap if needed.
+    if getattr(x, "is_nested", False):
+        x = x.unbind()[0]
+    return x
+
+
+def _set_samples(latent: dict, samples: torch.Tensor) -> dict:
+    out = latent.copy()
+    out["samples"] = samples
+    return out
+
+
+def _safe_mean_std(x: torch.Tensor, dims, eps=1e-6):
+    mean = x.mean(dim=dims, keepdim=True)
+    std = x.std(dim=dims, keepdim=True).clamp_min(eps)
+    return mean, std
+
+
+def _latent_brightness_contrast_gamma(
+    samples: torch.Tensor, brightness: float, contrast: float, gamma: float
+):
+    """
+    Latent "brightness/contrast" is not image brightness, but it is useful as:
+      - brightness: global scale
+      - contrast: scale deviation around per-image mean
+      - gamma: mild non-linear shaping on normalized latent (optional)
+    """
+    b = float(brightness)
+    c = float(contrast)
+    g = float(gamma)
+
+    x = samples
+    # brightness as a simple scale
+    x = x * b
+
+    # contrast around per-image mean (per batch item, per channel)
+    mean = x.mean(dim=(2, 3), keepdim=True)
+    x = (x - mean) * c + mean
+
+    if g != 1.0:
+        # apply gamma-ish curve to normalized latents to avoid wrecking scale
+        m, s = _safe_mean_std(x, dims=(2, 3))
+        z = (x - m) / s
+        # signed power curve (preserves sign)
+        z = torch.sign(z) * torch.pow(torch.abs(z).clamp_min(1e-6), 1.0 / g)
+        x = z * s + m
+
+    return x
+
+
+def _latent_levels_normalize(
+    samples: torch.Tensor, low_pct: float, high_pct: float, per_channel: bool
+):
+    """
+    Percentile trim + normalize, then re-match original mean/std (keeps sampler behavior stable).
+
+    low/high are percentiles like 0.5 and 99.5.
+    """
+    lo = float(low_pct) / 100.0
+    hi = float(high_pct) / 100.0
+
+    x = samples
+    B, C, H, W = x.shape
+    flat = x.reshape(B, C, -1)
+
+    if per_channel:
+        low = torch.quantile(flat, lo, dim=2)  # [B,C]
+        high = torch.quantile(flat, hi, dim=2)  # [B,C]
+    else:
+        # compute bounds using a scalar energy measure per pixel
+        energy = flat.abs().mean(dim=1)  # [B,N]
+        low_s = torch.quantile(energy, lo, dim=1)  # [B]
+        high_s = torch.quantile(energy, hi, dim=1)  # [B]
+        low = low_s[:, None].repeat(1, C)
+        high = high_s[:, None].repeat(1, C)
+
+    low = low[:, :, None, None]
+    high = high[:, :, None, None]
+    denom = torch.clamp(high - low, min=1e-6)
+
+    y = (x - low) / denom
+
+    # IMPORTANT: don't clamp like an image. Instead, match original distribution.
+    orig_mean, orig_std = _safe_mean_std(x, dims=(2, 3))
+    y_mean, y_std = _safe_mean_std(y, dims=(2, 3))
+    y = (y - y_mean) / y_std
+    y = y * orig_std + orig_mean
+    return y
+
+
+def _latent_saturation(samples: torch.Tensor, saturation: float):
+    """
+    "Saturation" analog:
+    - compute per-pixel mean across channels
+    - scale channel deviations from that mean
+
+    For many SD-like latents, this behaves like increasing/decreasing chroma.
+    """
+    s = float(saturation)
+    x = samples
+    mu = x.mean(dim=1, keepdim=True)  # [B,1,H,W]
+    return (x - mu) * s + mu
+
+
+def _latent_hue_rotate(samples: torch.Tensor, hue_degrees: float):
+    """
+    "Hue" analog:
+    Rotate the latent vector in a fixed 2D subspace.
+    Works best when C>=2. For C=4 (SD/Flux-ish), it's a mild creative control.
+
+    This is NOT true hue; it’s a stable channel-space rotation.
+    """
+    deg = float(hue_degrees)
+    if abs(deg) < 1e-6:
+        return samples
+
+    x = samples
+    B, C, H, W = x.shape
+    if C < 2:
+        return x
+
+    theta = deg * 3.141592653589793 / 180.0
+    cs = torch.cos(torch.tensor(theta, device=x.device, dtype=x.dtype))
+    sn = torch.sin(torch.tensor(theta, device=x.device, dtype=x.dtype))
+
+    # rotate channels 0 and 1; keep others unchanged
+    c0 = x[:, 0:1, :, :]
+    c1 = x[:, 1:2, :, :]
+
+    r0 = cs * c0 - sn * c1
+    r1 = sn * c0 + cs * c1
+
+    out = x.clone()
+    out[:, 0:1, :, :] = r0
+    out[:, 1:2, :, :] = r1
+    return out
+
+
+class SuperLatentBrightnessContrast:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "brightness": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                ),
+                "contrast": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                ),
+                "gamma": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.05, "max": 4.0, "step": 0.01},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "apply"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def apply(self, latent, brightness=1.0, contrast=1.0, gamma=1.0):
+        x = _get_samples(latent)
+        y = _latent_brightness_contrast_gamma(x, brightness, contrast, gamma)
+        return (_set_samples(latent, y),)
+
+
+class SuperLatentLevelsNormalize:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "low_clip": (
+                    "FLOAT",
+                    {"default": 0.5, "min": 0.0, "max": 10.0, "step": 0.1},
+                ),
+                "high_clip": (
+                    "FLOAT",
+                    {"default": 99.5, "min": 90.0, "max": 100.0, "step": 0.1},
+                ),
+                "per_channel": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "apply"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def apply(self, latent, low_clip=0.5, high_clip=99.5, per_channel=False):
+        x = _get_samples(latent)
+        y = _latent_levels_normalize(x, low_clip, high_clip, per_channel)
+        return (_set_samples(latent, y),)
+
+
+class SuperLatentChroma:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "saturation": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "apply"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def apply(self, latent, saturation=1.0):
+        x = _get_samples(latent)
+        y = _latent_saturation(x, saturation)
+        return (_set_samples(latent, y),)
+
+
+class SuperLatentHueRotate:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "hue_degrees": (
+                    "FLOAT",
+                    {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.5},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "apply"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def apply(self, latent, hue_degrees=0.0):
+        x = _get_samples(latent)
+        y = _latent_hue_rotate(x, hue_degrees)
+        return (_set_samples(latent, y),)
+
+
+class SuperLatentColorAdjustAllInOne:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "brightness": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                ),
+                "contrast": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                ),
+                "gamma": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.05, "max": 4.0, "step": 0.01},
+                ),
+                "low_clip": (
+                    "FLOAT",
+                    {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.1},
+                ),
+                "high_clip": (
+                    "FLOAT",
+                    {"default": 100.0, "min": 90.0, "max": 100.0, "step": 0.1},
+                ),
+                "levels_per_channel": ("BOOLEAN", {"default": False}),
+                "saturation": (
+                    "FLOAT",
+                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                ),
+                "hue_degrees": (
+                    "FLOAT",
+                    {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.5},
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "apply"
+    CATEGORY = "SuperNodes/Adjustment"
+
+    def apply(
+        self,
+        latent,
+        brightness=1.0,
+        contrast=1.0,
+        gamma=1.0,
+        low_clip=0.0,
+        high_clip=100.0,
+        levels_per_channel=False,
+        saturation=1.0,
+        hue_degrees=0.0,
+    ):
+        x = _get_samples(latent)
+
+        # Optional levels normalize (only if user actually trims)
+        if float(low_clip) > 0.0 or float(high_clip) < 100.0:
+            x = _latent_levels_normalize(
+                x, float(low_clip), float(high_clip), bool(levels_per_channel)
+            )
+
+        x = _latent_brightness_contrast_gamma(
+            x, float(brightness), float(contrast), float(gamma)
+        )
+        x = _latent_saturation(x, float(saturation))
+        x = _latent_hue_rotate(x, float(hue_degrees))
+
+        return (_set_samples(latent, x),)
+
+
 class SuperLevelsNormalize:
     @classmethod
     def INPUT_TYPES(cls):
