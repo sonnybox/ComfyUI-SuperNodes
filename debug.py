@@ -184,21 +184,18 @@ class SuperLatentStats:
 
 class SuperStopExecution:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
-                # "multiline": False ensures a single-line text input widget
                 "message": (
                     "STRING",
                     {
                         "multiline": False,
-                        "default": "Execution stopped manually.",
+                        "default": "Generic user",
                     },
                 ),
             },
             "optional": {
-                # This wildcard input allows you to connect any node (Image, Latent, etc.)
-                # to this node to force the execution flow to reach here.
                 "trigger": ("*", {}),
             },
         }
@@ -209,5 +206,5 @@ class SuperStopExecution:
     CATEGORY = "SuperNodes/debug"
 
     def halt_execution(self, message, trigger=None):
-        safe_message = str(message)
-        raise Exception(f"⛔ {safe_message}")
+        alert = str(message)
+        raise Exception(f"{alert}")
