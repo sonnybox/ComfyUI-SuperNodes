@@ -5,9 +5,7 @@ from .adjustment import (
     SuperLevelsNormalize,
     SuperWhiteBalanceCAT,
 )
-from .debug import (
-    SuperLatentStats,
-)
+from .debug import SuperLatentStats, SuperStopExecution
 from .image import ImageMaskCrop, RestoreMaskCrop
 from .qol import (
     FaceBBoxToMask,
@@ -40,6 +38,7 @@ NODE_CLASS_MAPPINGS = {
     "GetCommonAspectRatio": GetCommonAspectRatio,
     "SetReserveVRAM": SetReserveVRAM,
     "SuperLatentStats": SuperLatentStats,
+    "User Error": SuperStopExecution,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -63,6 +62,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GetCommonAspectRatio": "🐧 Get Aspect Ratio",
     "SetReserveVRAM": "🐧 Set Reserve VRAM",
     "SuperLatentStats": "🐧 Latent Stats",
+    "User Error": "🐧 Show Error Message",
 }
 
 print("\033[34m[SuperNodes]\033[0m Classes initialized.")

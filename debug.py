@@ -175,8 +175,39 @@ class SuperLatentStats:
 
     RETURN_TYPES = ("STRING",)
     FUNCTION = "run"
-    CATEGORY = "SuperNodes/adjustment"
+    CATEGORY = "SuperNodes/debug"
 
     def run(self, latent, label="latent", top_k=12):
         x = _get_samples(latent)
         return (_latent_stats_string(x, name=str(label), top_k=int(top_k)),)
+
+
+class SuperStopExecution:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                # "multiline": False ensures a single-line text input widget
+                "message": (
+                    "STRING",
+                    {
+                        "multiline": False,
+                        "default": "Execution stopped manually.",
+                    },
+                ),
+            },
+            "optional": {
+                # This wildcard input allows you to connect any node (Image, Latent, etc.)
+                # to this node to force the execution flow to reach here.
+                "trigger": ("*", {}),
+            },
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "halt_execution"
+    OUTPUT_NODE = True
+    CATEGORY = "SuperNodes/debug"
+
+    def halt_execution(self, message, trigger=None):
+        safe_message = str(message)
+        raise Exception(f"⛔ {safe_message}")
