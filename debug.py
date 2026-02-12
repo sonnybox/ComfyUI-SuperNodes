@@ -191,13 +191,17 @@ class SuperStopExecution:
                     "STRING",
                     {
                         "multiline": False,
-                        "default": "Generic user",
+                        "default": "Execution stopped by condition.",
                     },
                 ),
-            },
-            "optional": {
-                "trigger": ("*", {}),
-            },
+                "trigger": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": "If True, execution halts. If False, nothing happens.",
+                    },
+                ),
+            }
         }
 
     RETURN_TYPES = ()
@@ -205,6 +209,9 @@ class SuperStopExecution:
     OUTPUT_NODE = True
     CATEGORY = "SuperNodes/debug"
 
-    def halt_execution(self, message, trigger=None):
-        alert = str(message)
-        raise Exception(f"{alert}")
+    def halt_execution(self, message, trigger):
+        if trigger:
+            alert = str(message)
+            raise Exception(f"{alert}")
+
+        return ()
