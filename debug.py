@@ -191,7 +191,7 @@ class SuperStopExecution:
                     "STRING",
                     {
                         "multiline": False,
-                        "default": "Execution stopped by condition.",
+                        "default": "Message.",
                     },
                 ),
                 "trigger": (
@@ -199,6 +199,7 @@ class SuperStopExecution:
                     {
                         "default": True,
                         "tooltip": "If True, execution halts. If False, nothing happens.",
+                        "forceInput": True,
                     },
                 ),
             }
