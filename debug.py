@@ -180,39 +180,3 @@ class SuperLatentStats:
     def run(self, latent, label="latent", top_k=12):
         x = _get_samples(latent)
         return (_latent_stats_string(x, name=str(label), top_k=int(top_k)),)
-
-
-class SuperStopExecution:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "message": (
-                    "STRING",
-                    {
-                        "multiline": False,
-                        "default": "Message.",
-                    },
-                ),
-                "trigger": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "If True, execution halts. If False, nothing happens.",
-                        "forceInput": True,
-                    },
-                ),
-            }
-        }
-
-    RETURN_TYPES = ()
-    FUNCTION = "halt_execution"
-    OUTPUT_NODE = True
-    CATEGORY = "SuperNodes/debug"
-
-    def halt_execution(self, message, trigger):
-        if trigger:
-            alert = str(message)
-            raise Exception(f"{alert}")
-
-        return ()

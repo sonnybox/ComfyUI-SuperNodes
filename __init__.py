@@ -5,7 +5,7 @@ from .adjustment import (
     SuperLevelsNormalize,
     SuperWhiteBalanceCAT,
 )
-from .debug import SuperLatentStats, SuperStopExecution
+from .debug import SuperLatentStats
 from .image import ImageMaskCrop, RestoreMaskCrop
 from .qol import (
     FaceBBoxToMask,
@@ -13,6 +13,7 @@ from .qol import (
     ImageSizeCalculator,
     SetReserveVRAM,
     SuperResizeImage,
+    SuperStopExecution,
 )
 from .scheduler import SigmaReplace, SigmasGraph, SigmaSmoother, SigmasRescale
 from .tiling import CreateTiles, SeedVRCalculateTiles, StitchTiles
