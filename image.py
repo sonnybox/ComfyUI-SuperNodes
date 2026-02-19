@@ -502,7 +502,7 @@ class SuperPadImage:
                 "color": (
                     "STRING",
                     {
-                        "default": "#ffffff",
+                        "default": "#808080",
                         "multiline": False,
                         "tooltip": "Padding color as hex (#RRGGBB, RRGGBB, #RGB, RGB). Invalid values default to white.",
                     },
