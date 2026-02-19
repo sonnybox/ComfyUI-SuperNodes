@@ -1,3 +1,6 @@
+import re
+
+import comfy.utils  # type: ignore
 import numpy as np
 from PIL import Image
 import torch
@@ -409,3 +412,187 @@ class RestoreMaskCrop:
         out_image[:, y1:y2, x1:x2, :] = blended
 
         return (out_image,)
+
+
+class SuperPadImage:
+    """
+    Places an image onto an exact target canvas size and returns:
+
+    IMAGE: Final image at (target_width, target_height)
+    MASK:  1.0 = padded pixels, 0.0 = image pixels
+
+    Behavior:
+    - Image is first scaled to "contain" inside target (aspect preserved).
+    - Then scaled again by scale_factor (0.1–1.0).
+        * 1.0 = normal fill/letterbox
+        * <1.0 = shrink image to introduce padding on both axes
+    - Image is placed using horizontal/vertical shift.
+    """
+
+    upscale_methods = [
+        "nearest-exact",
+        "bilinear",
+        "area",
+        "bicubic",
+        "lanczos",
+    ]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE", {"tooltip": "The input image."}),
+                "target_height": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 1,
+                        "max": 16384,
+                        "step": 1,
+                        "tooltip": "Final output height in pixels.",
+                    },
+                ),
+                "target_width": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 1,
+                        "max": 16384,
+                        "step": 1,
+                        "tooltip": "Final output width in pixels.",
+                    },
+                ),
+                "shift_horizontal": (
+                    "FLOAT",
+                    {
+                        "default": 0.0,
+                        "min": -1.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "Horizontal placement: -1 = far left, 0 = center, 1 = far right.",
+                    },
+                ),
+                "shift_verticle": (
+                    "FLOAT",
+                    {
+                        "default": 0.0,
+                        "min": -1.0,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "Vertical placement: -1 = bottom, 0 = center, 1 = top.",
+                    },
+                ),
+                "scale_factor": (
+                    "FLOAT",
+                    {
+                        "default": 1.0,
+                        "min": 0.1,
+                        "max": 1.0,
+                        "step": 0.01,
+                        "tooltip": "Additional scale after fitting. 1.0 = normal fill. Smaller values shrink image to create padding.",
+                    },
+                ),
+                "scale_method": (
+                    cls.upscale_methods,
+                    {
+                        "default": "nearest-exact",
+                        "tooltip": "Resampling method used for resizing.",
+                    },
+                ),
+                "color": (
+                    "STRING",
+                    {
+                        "default": "#ffffff",
+                        "multiline": False,
+                        "tooltip": "Padding color as hex (#RRGGBB, RRGGBB, #RGB, RGB). Invalid values default to white.",
+                    },
+                ),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("IMAGE", "MASK")
+    FUNCTION = "pad"
+    CATEGORY = "SuperNodes"
+
+    def pad(
+        self,
+        image,
+        target_height,
+        target_width,
+        shift_horizontal,
+        shift_verticle,
+        scale_factor,
+        scale_method,
+        color,
+    ):
+        shift_horizontal = float(max(-1.0, min(1.0, shift_horizontal)))
+        shift_verticle = float(max(-1.0, min(1.0, shift_verticle)))
+        scale_factor = float(max(0.1, min(1.0, scale_factor)))
+
+        b, h, w, c = image.shape
+        device = image.device
+        dtype = image.dtype
+
+        pad_rgb = self._parse_hex_color(color)
+
+        # Contain scale
+        contain_scale = min(target_width / w, target_height / h)
+        cw = max(1, int(round(w * contain_scale)))
+        ch = max(1, int(round(h * contain_scale)))
+
+        # Extra scale
+        fw = min(target_width, max(1, int(round(cw * scale_factor))))
+        fh = min(target_height, max(1, int(round(ch * scale_factor))))
+
+        resized = self._resize(image[..., :3], fw, fh, scale_method)
+
+        canvas = torch.empty(
+            (b, target_height, target_width, 3), device=device, dtype=dtype
+        )
+        canvas[..., 0].fill_(pad_rgb[0])
+        canvas[..., 1].fill_(pad_rgb[1])
+        canvas[..., 2].fill_(pad_rgb[2])
+
+        mask = torch.ones(
+            (b, target_height, target_width), device=device, dtype=dtype
+        )
+
+        dx = target_width - fw
+        dy = target_height - fh
+
+        x0 = int(round(((shift_horizontal + 1.0) * 0.5) * dx)) if dx > 0 else 0
+        y0 = int(round(((1.0 - shift_verticle) * 0.5) * dy)) if dy > 0 else 0
+
+        x1, y1 = x0, y0
+        x2, y2 = x0 + fw, y0 + fh
+
+        canvas[:, y1:y2, x1:x2] = resized
+        mask[:, y1:y2, x1:x2] = 0.0
+
+        return (canvas, mask)
+
+    def _resize(self, img, w, h, method):
+        samples = img.movedim(-1, 1)
+        out = comfy.utils.common_upscale(samples, w, h, method, "disabled")
+        return out.movedim(1, -1)
+
+    def _parse_hex_color(self, value):
+        if not isinstance(value, str):
+            return (1.0, 1.0, 1.0)
+
+        s = value.strip()
+        if s.startswith("#"):
+            s = s[1:]
+
+        if re.fullmatch(r"[0-9a-fA-F]{3}", s):
+            s = "".join([c * 2 for c in s])
+
+        if not re.fullmatch(r"[0-9a-fA-F]{6}", s):
+            return (1.0, 1.0, 1.0)
+
+        return (
+            int(s[0:2], 16) / 255.0,
+            int(s[2:4], 16) / 255.0,
+            int(s[4:6], 16) / 255.0,
+        )
