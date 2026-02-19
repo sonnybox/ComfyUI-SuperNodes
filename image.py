@@ -472,7 +472,7 @@ class SuperPadImage:
                         "tooltip": "Horizontal placement: -1 = far left, 0 = center, 1 = far right.",
                     },
                 ),
-                "shift_verticle": (
+                "shift_vertical": (
                     "FLOAT",
                     {
                         "default": 0.0,
@@ -521,13 +521,13 @@ class SuperPadImage:
         target_height,
         target_width,
         shift_horizontal,
-        shift_verticle,
+        shift_vertical,
         scale_factor,
         scale_method,
         color,
     ):
         shift_horizontal = float(max(-1.0, min(1.0, shift_horizontal)))
-        shift_verticle = float(max(-1.0, min(1.0, shift_verticle)))
+        shift_vertical = float(max(-1.0, min(1.0, shift_vertical)))
         scale_factor = float(max(0.1, min(1.0, scale_factor)))
 
         b, h, w, c = image.shape
@@ -562,7 +562,7 @@ class SuperPadImage:
         dy = target_height - fh
 
         x0 = int(round(((shift_horizontal + 1.0) * 0.5) * dx)) if dx > 0 else 0
-        y0 = int(round(((1.0 - shift_verticle) * 0.5) * dy)) if dy > 0 else 0
+        y0 = int(round(((1.0 - shift_vertical) * 0.5) * dy)) if dy > 0 else 0
 
         x1, y1 = x0, y0
         x2, y2 = x0 + fw, y0 + fh
