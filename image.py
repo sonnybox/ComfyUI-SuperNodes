@@ -442,16 +442,6 @@ class SuperPadImage:
         return {
             "required": {
                 "image": ("IMAGE", {"tooltip": "The input image."}),
-                "target_height": (
-                    "INT",
-                    {
-                        "default": 1024,
-                        "min": 1,
-                        "max": 16384,
-                        "step": 1,
-                        "tooltip": "Final output height in pixels.",
-                    },
-                ),
                 "target_width": (
                     "INT",
                     {
@@ -460,6 +450,16 @@ class SuperPadImage:
                         "max": 16384,
                         "step": 1,
                         "tooltip": "Final output width in pixels.",
+                    },
+                ),
+                "target_height": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 1,
+                        "max": 16384,
+                        "step": 1,
+                        "tooltip": "Final output height in pixels.",
                     },
                 ),
                 "shift_horizontal": (
