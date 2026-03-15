@@ -1,3 +1,1 @@
-numpy
-pillow
 matplotlib

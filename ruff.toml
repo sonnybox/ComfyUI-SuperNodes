@@ -1,6 +1,7 @@
 # General settings
 line-length = 80
 indent-width = 4
+target-version = "py310"
 
 [format]
 quote-style = "double"

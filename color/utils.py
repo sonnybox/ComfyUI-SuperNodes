@@ -151,7 +151,6 @@ def _bradford_adaptation_matrix(
     return A
 
 
-# sRGB D65 matrices (linear)
 _RGB_TO_XYZ = torch.tensor(
     [
         [0.4124564, 0.3575761, 0.1804375],
@@ -169,77 +168,6 @@ _XYZ_TO_RGB = torch.tensor(
     ],
     dtype=torch.float32,
 )
-
-
-def _levels_normalize(
-    img: torch.Tensor,
-    low_pct: float = 0.5,
-    high_pct: float = 99.5,
-    per_channel: bool = False,
-):
-    """
-    Percentile-based levels normalization.
-
-    img: [B,H,W,3] float [0..1]
-    low_pct / high_pct: percentiles (0..100)
-    per_channel: if True, compute per RGB channel, else luminance-style joint
-    """
-
-    B = img.shape[0]
-    flat = img.view(B, -1, 3)
-
-    lo = low_pct / 100.0
-    hi = high_pct / 100.0
-
-    if per_channel:
-        lows = []
-        highs = []
-        for c in range(3):
-            chan = flat[..., c]
-            lows.append(torch.quantile(chan, lo, dim=1))
-            highs.append(torch.quantile(chan, hi, dim=1))
-        low = torch.stack(lows, dim=1)
-        high = torch.stack(highs, dim=1)
-    else:
-        # Use luminance-ish average for bounds
-        lum = flat.mean(dim=2)
-        low = torch.quantile(lum, lo, dim=1).unsqueeze(1).repeat(1, 3)
-        high = torch.quantile(lum, hi, dim=1).unsqueeze(1).repeat(1, 3)
-
-    low = low[:, None, None, :]
-    high = high[:, None, None, :]
-
-    out = (img - low) / torch.clamp(high - low, min=1e-6)
-    return _clamp01(out)
-
-
-class SuperLevelsNormalize:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "low_clip": (
-                    "FLOAT",
-                    {"default": 0.5, "min": 0.0, "max": 10.0, "step": 0.1},
-                ),
-                "high_clip": (
-                    "FLOAT",
-                    {"default": 99.5, "min": 90.0, "max": 100.0, "step": 0.1},
-                ),
-                "per_channel": ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Adjustment"
-
-    def apply(self, image, low_clip=0.5, high_clip=99.5, per_channel=False):
-        out = _levels_normalize(
-            image, float(low_clip), float(high_clip), bool(per_channel)
-        )
-        return (out,)
 
 
 def _apply_white_balance_cat(
@@ -271,11 +199,19 @@ def _apply_white_balance_cat(
     # Destination from Kelvin + tint offset
     dst_x, dst_y = _kelvin_to_xy_approx(float(temperature_k))
 
+    # Calculate baseline D65 offset so 6500K is perfectly neutral (D65)
+    base_x, base_y = _kelvin_to_xy_approx(6500.0)
+    base_u, base_v = _xy_to_uv(base_x, base_y)
+    d65_u, d65_v = _xy_to_uv(src_x, src_y)
+    u_offset = d65_u - base_u
+    v_offset = d65_v - base_v
+
     # Tint: shift in UCS v direction (green<->magenta feel)
     # Scale chosen to be "good enough" and not insane.
     # If you want stronger/weaker, tweak 0.05.
     u, v = _xy_to_uv(dst_x, dst_y)
-    v = v + float(tint) * 0.05
+    u = u + u_offset
+    v = v + v_offset + float(tint) * 0.05
     # Clamp to sane bounds
     v = float(max(1e-6, min(0.999999, v)))
     dst_x, dst_y = _uv_to_xy(u, v)
@@ -412,147 +348,3 @@ def _apply_saturation_hue(
     hsv[..., 0] = (hsv[..., 0] + (float(hue_degrees) / 360.0)) % 1.0
     hsv[..., 1] = (hsv[..., 1] * float(saturation)).clamp(0.0, 1.0)
     return _hsv_to_rgb(hsv)
-
-
-class SuperBrightnessContrast:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "brightness": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
-                ),
-                "contrast": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
-                ),
-                "gamma": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.05, "max": 4.0, "step": 0.01},
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Adjustment"
-
-    def apply(self, image, brightness=1.0, contrast=1.0, gamma=1.0):
-        return (
-            _apply_brightness_contrast_gamma(
-                image, brightness, contrast, gamma
-            ),
-        )
-
-
-class SuperHueSaturation:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "saturation": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
-                ),
-                "hue_degrees": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.5},
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Adjustment"
-
-    def apply(self, image, saturation=1.0, hue_degrees=0.0):
-        return (_apply_saturation_hue(image, saturation, hue_degrees),)
-
-
-class SuperWhiteBalanceCAT:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "temperature_k": (
-                    "INT",
-                    {"default": 6500, "min": 1650, "max": 25000, "step": 50},
-                ),
-                "tint": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01},
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Adjustment"
-
-    def apply(self, image, temperature_k=6500, tint=0.0):
-        out = _apply_white_balance_cat(image, float(temperature_k), float(tint))
-        return (out,)
-
-
-class SuperColorAdjustAllInOne:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "brightness": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
-                ),
-                "contrast": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
-                ),
-                "gamma": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.05, "max": 4.0, "step": 0.01},
-                ),
-                "saturation": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
-                ),
-                "hue_degrees": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.5},
-                ),
-                "temperature_k": (
-                    "INT",
-                    {"default": 6500, "min": 1650, "max": 25000, "step": 50},
-                ),
-                "tint": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01},
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Adjustment"
-
-    def apply(
-        self,
-        image,
-        brightness=1.0,
-        contrast=1.0,
-        gamma=1.0,
-        saturation=1.0,
-        hue_degrees=0.0,
-        temperature_k=6500,
-        tint=0.0,
-    ):
-        out = _apply_brightness_contrast_gamma(
-            image, brightness, contrast, gamma
-        )
-        out = _apply_saturation_hue(out, saturation, hue_degrees)
-        out = _apply_white_balance_cat(out, float(temperature_k), float(tint))
-        return (out,)
