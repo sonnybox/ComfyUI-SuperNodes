@@ -1,47 +1,46 @@
+from comfy_api.latest import io
 import torch
 
 
-class FaceBBoxToMask:
+class FaceBBoxToMask(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "face_bboxes": ("BBOX",),
-                "images": ("IMAGE",),
-                "extend_up_percent": (
-                    "INT",
-                    {"default": 0, "min": -100, "max": 500, "step": 1},
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="FaceBBoxToMask",
+            display_name="🐧 Convert BBox to Masks",
+            category="SuperNodes/Extras",
+            inputs=[
+                io.Custom("BBOX").Input("face_bboxes"),
+                io.Image.Input("images"),
+                io.Int.Input(
+                    "extend_up_percent", default=0, min=-100, max=500, step=1
                 ),
-                "extend_down_percent": (
-                    "INT",
-                    {"default": 0, "min": -100, "max": 500, "step": 1},
+                io.Int.Input(
+                    "extend_down_percent", default=0, min=-100, max=500, step=1
                 ),
-                "extend_left_percent": (
-                    "INT",
-                    {"default": 0, "min": -100, "max": 500, "step": 1},
+                io.Int.Input(
+                    "extend_left_percent", default=0, min=-100, max=500, step=1
                 ),
-                "extend_right_percent": (
-                    "INT",
-                    {"default": 0, "min": -100, "max": 500, "step": 1},
+                io.Int.Input(
+                    "extend_right_percent", default=0, min=-100, max=500, step=1
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Mask.Output(display_name="MASK"),
+            ],
+            description="Converts face bounding boxes into a mask batch, with percent-based directional extension.",
+        )
 
-    RETURN_TYPES = ("MASK",)
-    RETURN_NAMES = ("MASK",)
-    FUNCTION = "process"
-    CATEGORY = "SuperNodes/Extras"
-    DESCRIPTION = "Converts face bounding boxes into a mask batch, with percent-based directional extension."
-
-    def process(
-        self,
+    @classmethod
+    def execute(
+        cls,
         face_bboxes,
         images,
         extend_up_percent,
         extend_down_percent,
         extend_left_percent,
         extend_right_percent,
-    ):
+    ) -> io.NodeOutput:
         batch_size, height, width, _ = images.shape
         masks = torch.zeros((batch_size, height, width), dtype=torch.float32)
 
@@ -75,9 +74,7 @@ class FaceBBoxToMask:
             if x2 > x1 and y2 > y1:
                 masks[i, y1:y2, x1:x2] = 1.0
 
-        return (masks,)
+        return io.NodeOutput(masks)
 
 
-NODE_CLASS_MAPPINGS = {"FaceBBoxToMask": FaceBBoxToMask}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"FaceBBoxToMask": "🐧 Convert BBox to Masks"}
+V3_NODES = [FaceBBoxToMask]

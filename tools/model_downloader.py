@@ -5,58 +5,54 @@ import urllib.parse
 
 import comfy.model_management
 import comfy.utils
+from comfy_api.latest import io
 import folder_paths
 import requests
 
 
-class SuperModelDownloader:
+class SuperModelDownloader(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
+    def define_schema(cls) -> io.Schema:
         # Dynamically load all valid ComfyUI model directories using the correct attribute
         valid_folders = list(folder_paths.folder_names_and_paths.keys())
 
-        return {
-            "required": {
-                "url": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "tooltip": "The URL to download the model from.",
-                    },
+        return io.Schema(
+            node_id="SuperModelDownloader",
+            display_name="🐧 Model Downloader",
+            category="SuperNodes/Tools",
+            inputs=[
+                io.String.Input(
+                    "url",
+                    default="",
+                    tooltip="The URL to download the model from.",
                 ),
-                "destination": (
-                    valid_folders,
-                    {
-                        "tooltip": "Select the destination folder (e.g., checkpoints, loras)."
-                    },
+                io.Combo.Input(
+                    "destination",
+                    options=valid_folders,
+                    tooltip="Select the destination folder (e.g., checkpoints, loras).",
                 ),
-            },
-            "optional": {
-                "civitai_api_key": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "tooltip": "Optional if CIVITAI_API_KEY is in your environment vars.",
-                    },
+                io.String.Input(
+                    "civitai_api_key",
+                    default="",
+                    optional=True,
+                    tooltip="Optional if CIVITAI_API_KEY is in your environment vars.",
                 ),
-                "huggingface_api_key": (
-                    "STRING",
-                    {
-                        "default": "",
-                        "tooltip": "Optional if HUGGINGFACE_API_KEY is in your environment vars.",
-                    },
+                io.String.Input(
+                    "huggingface_api_key",
+                    default="",
+                    optional=True,
+                    tooltip="Optional if HUGGINGFACE_API_KEY is in your environment vars.",
                 ),
-            },
-        }
+            ],
+            outputs=[
+                io.Custom("*").Output(display_name="model_name"),
+            ],
+        )
 
-    RETURN_TYPES = ("*",)
-    RETURN_NAMES = ("model_name",)
-    FUNCTION = "download_model"
-    CATEGORY = "SuperNodes/Tools"
-
-    def download_model(
-        self, url, destination, civitai_api_key="", huggingface_api_key=""
-    ):
+    @classmethod
+    def execute(
+        cls, url, destination, civitai_api_key="", huggingface_api_key=""
+    ) -> io.NodeOutput:
         if not url.strip():
             raise ValueError("No URL provided.")
 
@@ -145,7 +141,7 @@ class SuperModelDownloader:
         if existing_size > 0:
             if total_size > 0 and existing_size == total_size:
                 print(f"✅ File {filename} already exists. Skipping download")
-                return (filename,)
+                return io.NodeOutput(filename)
             elif total_size > 0 and existing_size < total_size:
                 print(f"⚠️ Resuming incomplete download for {filename}")
                 headers["Range"] = f"bytes={existing_size}-"
@@ -196,9 +192,7 @@ class SuperModelDownloader:
                         last_print_time = current_time
 
         print(f"✅ Downloaded {filename}")
-        return (filename,)
+        return io.NodeOutput(filename)
 
 
-NODE_CLASS_MAPPINGS = {"SuperModelDownloader": SuperModelDownloader}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperModelDownloader": "🐧 Model Downloader"}
+V3_NODES = [SuperModelDownloader]

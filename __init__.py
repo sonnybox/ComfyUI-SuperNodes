@@ -2,8 +2,11 @@ import importlib
 from pathlib import Path
 import traceback
 
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+from comfy_api.latest import ComfyExtension, io
+
+V3_NODES = []
+__all__ = []
+
 
 this_dir = Path(__file__).parent
 for folder in this_dir.iterdir():
@@ -14,14 +17,28 @@ for folder in this_dir.iterdir():
             module_name = f".{folder.name}.{file.stem}"
             try:
                 module = importlib.import_module(module_name, package=__name__)
-                if hasattr(module, "NODE_CLASS_MAPPINGS"):
-                    NODE_CLASS_MAPPINGS.update(module.NODE_CLASS_MAPPINGS)
-                if hasattr(module, "NODE_DISPLAY_NAME_MAPPINGS"):
-                    NODE_DISPLAY_NAME_MAPPINGS.update(
-                        module.NODE_DISPLAY_NAME_MAPPINGS
-                    )
+                if hasattr(module, "V3_NODES"):
+                    for node_class in module.V3_NODES:
+                        try:
+                            node_class.define_schema()
+                            V3_NODES.append(node_class)
+                        except Exception:
+                            print(
+                                f"\n[SuperNodes] Failed to define schema for node: {node_class.__name__} in {module_name}"
+                            )
+                            traceback.print_exc()
             except Exception:
-                print(f"\n[SuperNodes] Failed to load node: {module_name}")
+                print(f"\n[SuperNodes] Failed to load module: {module_name}")
                 traceback.print_exc()
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+
+class SuperNodesExtension(ComfyExtension):
+    async def get_node_list(self) -> list[type[io.ComfyNode]]:
+        return V3_NODES
+
+
+async def comfy_entrypoint() -> ComfyExtension:
+    return SuperNodesExtension()
+
+
+__all__.append("comfy_entrypoint")

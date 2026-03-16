@@ -1,43 +1,41 @@
+from comfy_api.latest import io
 import torch
 
 
-class SigmaSmoother:
+class SigmaSmoother(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "sigmas": (
-                    "SIGMAS",
-                    {
-                        "tooltip": "The input sigmas tensor, typically ending in 0.0."
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SigmaSmoother",
+            display_name="🐧 Sigma Smoother",
+            category="SuperNodes/Scheduling",
+            description="Inserts smoothed interpolation steps at the end of a sigma schedule before the final zero, useful for refining the final denoising steps.",
+            inputs=[
+                io.Custom("SIGMAS").Input(
+                    "sigmas",
+                    tooltip="The input sigmas tensor, typically ending in 0.0.",
                 ),
-                "smooth_steps": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 1,
-                        "max": 100,
-                        "tooltip": "Number of additional smoothed steps to insert between the last non-zero sigma and 0.0.",
-                    },
+                io.Int.Input(
+                    "smooth_steps",
+                    default=1,
+                    min=1,
+                    max=100,
+                    tooltip="Number of additional smoothed steps to insert between the last non-zero sigma and 0.0.",
                 ),
-                "interpolation_type": (
-                    ["linear", "decay"],
-                    {
-                        "default": "linear",
-                        "tooltip": "Method to calculate the intermediate sigma values.",
-                    },
+                io.Combo.Input(
+                    "interpolation_type",
+                    options=["linear", "decay"],
+                    default="linear",
+                    tooltip="Method to calculate the intermediate sigma values.",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Custom("SIGMAS").Output(display_name="SIGMAS"),
+            ],
+        )
 
-    RETURN_TYPES = ("SIGMAS",)
-    RETURN_NAMES = ("SIGMAS",)
-    FUNCTION = "smooth_sigmas"
-    CATEGORY = "SuperNodes/Scheduling"
-    DESCRIPTION = "Inserts smoothed interpolation steps at the end of a sigma schedule before the final zero, useful for refining the final denoising steps."
-
-    def smooth_sigmas(self, sigmas, smooth_steps, interpolation_type):
+    @classmethod
+    def execute(cls, sigmas, smooth_steps, interpolation_type) -> io.NodeOutput:
         # Ensure we are working with a float tensor
         if sigmas.dtype != torch.float32 and sigmas.dtype != torch.float64:
             sigmas = sigmas.float()
@@ -50,7 +48,9 @@ class SigmaSmoother:
 
         if len(active_sigmas) == 0:
             # Edge case: empty or only zero input
-            return (sigmas,)
+            return io.NodeOutput(
+                sigmas,
+            )
 
         last_sigma = active_sigmas[-1].item()
         new_steps = []
@@ -88,9 +88,7 @@ class SigmaSmoother:
 
         result_sigmas = torch.cat(parts)
 
-        return (result_sigmas,)
+        return io.NodeOutput(result_sigmas)
 
 
-NODE_CLASS_MAPPINGS = {"SigmaSmoother": SigmaSmoother}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SigmaSmoother": "🐧 Sigma Smoother"}
+V3_NODES = [SigmaSmoother]

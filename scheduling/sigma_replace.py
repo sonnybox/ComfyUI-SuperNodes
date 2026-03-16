@@ -1,43 +1,44 @@
-class SigmaReplace:
+from comfy_api.latest import io
+
+
+class SigmaReplace(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "sigmas": (
-                    "SIGMAS",
-                    {"tooltip": "Input sigma schedule."},
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SigmaReplace",
+            display_name="🐧 Sigma Replace",
+            category="SuperNodes/Scheduling",
+            description="Replaces a single sigma value at the specified index. Index -1 is last.",
+            inputs=[
+                io.Custom("SIGMAS").Input(
+                    "sigmas", tooltip="Input sigma schedule."
                 ),
-                "index": (
-                    "INT",
-                    {
-                        "default": 0,
-                        "min": -1,
-                        "max": 10_000,
-                        "step": 1,
-                        "tooltip": "Index to replace. 0 = first, -1 = last.",
-                    },
+                io.Int.Input(
+                    "index",
+                    default=0,
+                    min=-1,
+                    max=10_000,
+                    step=1,
+                    tooltip="Index to replace. 0 = first, -1 = last.",
                 ),
-                "value": (
-                    "FLOAT",
-                    {
-                        "default": 1.0,
-                        "min": 0.0,
-                        "max": 10_000.0,
-                        "step": 0.01,
-                        "tooltip": "New sigma value to replace at the given index.",
-                    },
+                io.Float.Input(
+                    "value",
+                    default=1.0,
+                    min=0.0,
+                    max=10_000.0,
+                    step=0.01,
+                    tooltip="New sigma value to replace at the given index.",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Custom("SIGMAS").Output(
+                    tooltip="Sigma schedule with one value replaced."
+                ),
+            ],
+        )
 
-    RETURN_TYPES = ("SIGMAS",)
-    OUTPUT_TOOLTIPS = ("Sigma schedule with one value replaced.",)
-    FUNCTION = "replace"
-
-    CATEGORY = "SuperNodes/Scheduling"
-    DESCRIPTION = "Replaces a single sigma value at the specified index. Index -1 is last."
-
-    def replace(self, sigmas, index, value):
+    @classmethod
+    def execute(cls, sigmas, index, value) -> io.NodeOutput:
         s = sigmas.clone()
         length = s.shape[0]
 
@@ -68,9 +69,7 @@ class SigmaReplace:
                 )
 
         s[index] = value
-        return (s,)
+        return io.NodeOutput(s)
 
 
-NODE_CLASS_MAPPINGS = {"SigmaReplace": SigmaReplace}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SigmaReplace": "🐧 Sigma Replace"}
+V3_NODES = [SigmaReplace]

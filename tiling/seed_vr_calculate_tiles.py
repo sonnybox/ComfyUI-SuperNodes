@@ -1,43 +1,46 @@
-class SeedVRCalculateTiles:
+from comfy_api.latest import io
+
+
+class SeedVRCalculateTiles(io.ComfyNode):
     """
     Calculates the optimal number of rows, cols, and overlap to tile an image
     based on a target pixel limit (target_tile_size^2) and anticipated upscale factor.
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE", {"tooltip": "The source image to measure."}),
-                "target_tile_size": (
-                    "INT",
-                    {
-                        "default": 1024,
-                        "min": 256,
-                        "max": 8192,
-                        "step": 64,
-                        "tooltip": "Target resolution side length (e.g. 1024 = 1MP limit).",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SuperSVRCalcTiles",
+            display_name="🐧 SeedVR Calculate Tiles",
+            category="SuperNodes/Tiling",
+            inputs=[
+                io.Image.Input("image", tooltip="The source image to measure."),
+                io.Int.Input(
+                    "target_tile_size",
+                    default=1024,
+                    min=256,
+                    max=8192,
+                    step=64,
+                    tooltip="Target resolution side length (e.g. 1024 = 1MP limit).",
                 ),
-                "upscale_by": (
-                    "FLOAT",
-                    {
-                        "default": 1.0,
-                        "min": 1.0,
-                        "max": 1024.0,
-                        "step": 0.1,
-                        "tooltip": "The scale factor you intend to use. Tiling is calculated relative to the upscaled dimensions.",
-                    },
+                io.Float.Input(
+                    "upscale_by",
+                    default=1.0,
+                    min=1.0,
+                    max=1024.0,
+                    step=0.1,
+                    tooltip="The scale factor you intend to use. Tiling is calculated relative to the upscaled dimensions.",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Int.Output(display_name="rows"),
+                io.Int.Output(display_name="cols"),
+                io.Float.Output(display_name="suggested_overlap"),
+            ],
+        )
 
-    RETURN_TYPES = ("INT", "INT", "FLOAT")
-    RETURN_NAMES = ("rows", "cols", "suggested_overlap")
-    FUNCTION = "calculate"
-    CATEGORY = "SuperNodes/Tiling"
-
-    def calculate(self, image, target_tile_size, upscale_by):
+    @classmethod
+    def execute(cls, image, target_tile_size, upscale_by) -> io.NodeOutput:
         batch_size, h_orig, w_orig, c = image.shape
 
         # Calculate the dimensions of the final upscaled image
@@ -96,9 +99,7 @@ class SeedVRCalculateTiles:
             else:
                 rows += 1
 
-        return (rows, cols, overlap)
+        return io.NodeOutput(rows, cols, overlap)
 
 
-NODE_CLASS_MAPPINGS = {"SuperSVRCalcTiles": SeedVRCalculateTiles}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperSVRCalcTiles": "🐧 SeedVR Calculate Tiles"}
+V3_NODES = [SeedVRCalculateTiles]

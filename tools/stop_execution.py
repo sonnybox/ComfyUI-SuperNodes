@@ -1,39 +1,37 @@
-class SuperStopExecution:
+from comfy_api.latest import io
+
+
+class SuperStopExecution(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "message": (
-                    "STRING",
-                    {
-                        "multiline": False,
-                        "default": "Message.",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="User Error",
+            display_name="🐧 Show Error Message",
+            category="SuperNodes/Tools",
+            is_output_node=True,
+            inputs=[
+                io.String.Input(
+                    "message",
+                    multiline=False,
+                    default="Message.",
                 ),
-                "trigger": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "If True, execution halts. If False, nothing happens.",
-                        "forceInput": True,
-                    },
+                io.Boolean.Input(
+                    "trigger",
+                    default=True,
+                    tooltip="If True, execution halts. If False, nothing happens.",
+                    force_input=True,
                 ),
-            }
-        }
+            ],
+            outputs=[],
+        )
 
-    RETURN_TYPES = ()
-    FUNCTION = "halt_execution"
-    OUTPUT_NODE = True
-    CATEGORY = "SuperNodes/Tools"
-
-    def halt_execution(self, message, trigger):
+    @classmethod
+    def execute(cls, message, trigger) -> io.NodeOutput:
         if trigger:
             alert = str(message)
             raise Exception(f"{alert}")
 
-        return ()
+        return io.NodeOutput()
 
 
-NODE_CLASS_MAPPINGS = {"User Error": SuperStopExecution}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"User Error": "🐧 Show Error Message"}
+V3_NODES = [SuperStopExecution]

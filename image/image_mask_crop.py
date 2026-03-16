@@ -1,56 +1,58 @@
+from comfy_api.latest import io
 import torch
 
 
-class ImageMaskCrop:
+class ImageMaskCrop(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": (
-                    "IMAGE",
-                    {"tooltip": "The source image to be cropped."},
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="ImageMaskCrop",
+            display_name="🐧 Crop Image using Mask",
+            category="SuperNodes/Image",
+            description="Crops an image based on a mask's bounding box, with optional padding and dimension constraints.",
+            inputs=[
+                io.Image.Input(
+                    "image", tooltip="The source image to be cropped."
                 ),
-                "mask": (
-                    "MASK",
-                    {
-                        "tooltip": "The binary mask defining the region of interest to crop."
-                    },
+                io.Mask.Input(
+                    "mask",
+                    tooltip="The binary mask defining the region of interest to crop.",
                 ),
-                "padding": (
-                    "INT",
-                    {
-                        "default": 0,
-                        "min": 0,
-                        "max": 4096,
-                        "step": 1,
-                        "tooltip": "Amount of padding (in pixels) to add around the mask bounding box.",
-                    },
+                io.Int.Input(
+                    "padding",
+                    default=0,
+                    min=0,
+                    max=4096,
+                    step=1,
+                    tooltip="Amount of padding (in pixels) to add around the mask bounding box.",
                 ),
-                "multiple_of": (
-                    "INT",
-                    {
-                        "default": 16,
-                        "min": 1,
-                        "max": 512,
-                        "step": 1,
-                        "tooltip": "Ensure the crop dimensions are a multiple of this value (critical for UNet based processing).",
-                    },
+                io.Int.Input(
+                    "multiple_of",
+                    default=16,
+                    min=1,
+                    max=512,
+                    step=1,
+                    tooltip="Ensure the crop dimensions are a multiple of this value (critical for UNet based processing).",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Image.Output(
+                    display_name="cropped_image",
+                    tooltip="The cropped image region.",
+                ),
+                io.Mask.Output(
+                    display_name="cropped_mask",
+                    tooltip="The cropped mask region.",
+                ),
+                io.Custom("CROP_INFO").Output(
+                    display_name="uncrop_info",
+                    tooltip="Metadata containing coordinates and original size, required for restoration.",
+                ),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE", "MASK", "CROP_INFO")
-    RETURN_NAMES = ("cropped_image", "cropped_mask", "uncrop_info")
-    OUTPUT_TOOLTIPS = (
-        "The cropped image region.",
-        "The cropped mask region.",
-        "Metadata containing coordinates and original size, required for restoration.",
-    )
-    FUNCTION = "crop"
-    CATEGORY = "SuperNodes/Image"
-    DESCRIPTION = "Crops an image based on a mask's bounding box, with optional padding and dimension constraints."
-
-    def crop(self, image, mask, padding, multiple_of):
+    @classmethod
+    def execute(cls, image, mask, padding, multiple_of) -> io.NodeOutput:
         # Handle empty mask
         if mask.max() == 0:
             empty_info = {
@@ -61,7 +63,7 @@ class ImageMaskCrop:
                 "original_size": (image.shape[1], image.shape[2]),
                 "mask_patch": None,
             }
-            return (image, mask, empty_info)
+            return io.NodeOutput(image, mask, empty_info)
 
         # 1. Binarize Mask (Round to nearest 0 or 1 based on 0.5 threshold)
         mask_binary = (mask > 0.5).float()
@@ -147,9 +149,7 @@ class ImageMaskCrop:
             "mask_patch": cropped_mask,  # Store original mask crop for restoration
         }
 
-        return (cropped_image, cropped_mask, uncrop_info)
+        return io.NodeOutput(cropped_image, cropped_mask, uncrop_info)
 
 
-NODE_CLASS_MAPPINGS = {"ImageMaskCrop": ImageMaskCrop}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"ImageMaskCrop": "🐧 Crop Image using Mask"}
+V3_NODES = [ImageMaskCrop]

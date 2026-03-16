@@ -1,3 +1,5 @@
+from comfy_api.latest import io
+
 from .utils import (
     _apply_brightness_contrast_gamma,
     _apply_saturation_hue,
@@ -5,49 +7,45 @@ from .utils import (
 )
 
 
-class SuperColorAdjustAllInOne:
+class SuperColorAdjustAllInOne(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "brightness": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SuperColorAdjustAllInOne",
+            display_name="🐧 Adjust Color AIO",
+            category="SuperNodes/Color",
+            inputs=[
+                io.Image.Input("image"),
+                io.Float.Input(
+                    "brightness", default=1.0, min=0.0, max=4.0, step=0.01
                 ),
-                "contrast": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                io.Float.Input(
+                    "contrast", default=1.0, min=0.0, max=4.0, step=0.01
                 ),
-                "gamma": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.05, "max": 4.0, "step": 0.01},
+                io.Float.Input(
+                    "gamma", default=1.0, min=0.05, max=4.0, step=0.01
                 ),
-                "saturation": (
-                    "FLOAT",
-                    {"default": 1.0, "min": 0.0, "max": 4.0, "step": 0.01},
+                io.Float.Input(
+                    "saturation", default=1.0, min=0.0, max=4.0, step=0.01
                 ),
-                "hue_degrees": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.5},
+                io.Float.Input(
+                    "hue_degrees", default=0.0, min=-180.0, max=180.0, step=0.5
                 ),
-                "temperature_k": (
-                    "INT",
-                    {"default": 6500, "min": 1650, "max": 25000, "step": 50},
+                io.Int.Input(
+                    "temperature_k", default=6500, min=1650, max=25000, step=50
                 ),
-                "tint": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01},
+                io.Float.Input(
+                    "tint", default=0.0, min=-1.0, max=1.0, step=0.01
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Image.Output(display_name="IMAGE"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Color"
-
-    def apply(
-        self,
+    @classmethod
+    def execute(
+        cls,
         image,
         brightness=1.0,
         contrast=1.0,
@@ -56,15 +54,13 @@ class SuperColorAdjustAllInOne:
         hue_degrees=0.0,
         temperature_k=6500,
         tint=0.0,
-    ):
+    ) -> io.NodeOutput:
         out = _apply_brightness_contrast_gamma(
             image, brightness, contrast, gamma
         )
         out = _apply_saturation_hue(out, saturation, hue_degrees)
         out = _apply_white_balance_cat(out, float(temperature_k), float(tint))
-        return (out,)
+        return io.NodeOutput(out)
 
 
-NODE_CLASS_MAPPINGS = {"SuperColorAdjustAllInOne": SuperColorAdjustAllInOne}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperColorAdjustAllInOne": "🐧 Adjust Color AIO"}
+V3_NODES = [SuperColorAdjustAllInOne]

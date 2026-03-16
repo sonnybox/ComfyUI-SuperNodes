@@ -1,32 +1,33 @@
+from comfy_api.latest import io
+
 from .utils import _apply_white_balance_cat
 
 
-class SuperWhiteBalanceCAT:
+class SuperWhiteBalanceCAT(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE",),
-                "temperature_k": (
-                    "INT",
-                    {"default": 6500, "min": 1650, "max": 25000, "step": 50},
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SuperWhiteBalanceCAT",
+            display_name="🐧 Adjust White Balance",
+            category="SuperNodes/Color",
+            inputs=[
+                io.Image.Input("image"),
+                io.Int.Input(
+                    "temperature_k", default=6500, min=1650, max=25000, step=50
                 ),
-                "tint": (
-                    "FLOAT",
-                    {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01},
+                io.Float.Input(
+                    "tint", default=0.0, min=-1.0, max=1.0, step=0.01
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Image.Output(display_name="IMAGE"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "apply"
-    CATEGORY = "SuperNodes/Color"
-
-    def apply(self, image, temperature_k=6500, tint=0.0):
+    @classmethod
+    def execute(cls, image, temperature_k=6500, tint=0.0) -> io.NodeOutput:
         out = _apply_white_balance_cat(image, float(temperature_k), float(tint))
-        return (out,)
+        return io.NodeOutput(out)
 
 
-NODE_CLASS_MAPPINGS = {"SuperWhiteBalanceCAT": SuperWhiteBalanceCAT}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperWhiteBalanceCAT": "🐧 Adjust White Balance"}
+V3_NODES = [SuperWhiteBalanceCAT]

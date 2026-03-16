@@ -1,29 +1,35 @@
-class GetCommonAspectRatio:
+from comfy_api.latest import io
+
+
+class GetCommonAspectRatio(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "width": ("INT", {"default": 1024, "min": 1, "max": 65536}),
-                "height": ("INT", {"default": 1024, "min": 1, "max": 65536}),
-                "1:1": ("BOOLEAN", {"default": True}),
-                "4:3": ("BOOLEAN", {"default": True}),
-                "3:2": ("BOOLEAN", {"default": True}),
-                "5:4": ("BOOLEAN", {"default": True}),
-                "16:9": ("BOOLEAN", {"default": True}),
-                "16:10": ("BOOLEAN", {"default": True}),
-                "21:9": ("BOOLEAN", {"default": True}),
-                "2:1": ("BOOLEAN", {"default": True}),
-                "1.85:1": ("BOOLEAN", {"default": True}),
-                "2.39:1": ("BOOLEAN", {"default": True}),
-            }
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="GetCommonAspectRatio",
+            display_name="🐧 Get Aspect Ratio",
+            category="SuperNodes/Tools",
+            inputs=[
+                io.Int.Input("width", default=1024, min=1, max=65536),
+                io.Int.Input("height", default=1024, min=1, max=65536),
+                io.Boolean.Input("1:1", default=True),
+                io.Boolean.Input("4:3", default=True),
+                io.Boolean.Input("3:2", default=True),
+                io.Boolean.Input("5:4", default=True),
+                io.Boolean.Input("16:9", default=True),
+                io.Boolean.Input("16:10", default=True),
+                io.Boolean.Input("21:9", default=True),
+                io.Boolean.Input("2:1", default=True),
+                io.Boolean.Input("1.85:1", default=True),
+                io.Boolean.Input("2.39:1", default=True),
+            ],
+            outputs=[
+                io.Int.Output(display_name="aspect_w"),
+                io.Int.Output(display_name="aspect_h"),
+            ],
+        )
 
-    RETURN_TYPES = ("INT", "INT")
-    RETURN_NAMES = ("aspect_w", "aspect_h")
-    FUNCTION = "get_ratio"
-    CATEGORY = "SuperNodes/Tools"
-
-    def get_ratio(self, width, height, **kwargs):
+    @classmethod
+    def execute(cls, width, height, **kwargs) -> io.NodeOutput:
         # 1. Map the string keys to their mathematical ratios
         ratios = {
             "1:1": (1, 1),
@@ -82,9 +88,7 @@ class GetCommonAspectRatio:
             final_w = max(target_w, target_h)
             final_h = min(target_w, target_h)
 
-        return (final_w, final_h)
+        return io.NodeOutput(final_w, final_h)
 
 
-NODE_CLASS_MAPPINGS = {"GetCommonAspectRatio": GetCommonAspectRatio}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"GetCommonAspectRatio": "🐧 Get Aspect Ratio"}
+V3_NODES = [GetCommonAspectRatio]

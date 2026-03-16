@@ -1,24 +1,23 @@
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional
 
 import comfy.utils
+from comfy_api.latest import io
 import torch
 
 
-class SuperResizeImage:
+class SuperResizeImage(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls) -> Dict[str, Any]:
-        return {
-            "required": {
-                "width": (
-                    "INT",
-                    {"default": 512, "min": 1, "max": 65536, "step": 1},
-                ),
-                "height": (
-                    "INT",
-                    {"default": 512, "min": 1, "max": 65536, "step": 1},
-                ),
-                "crop": (
-                    [
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SuperResizeImage",
+            display_name="🐧 Resize Image & Mask",
+            category="SuperNodes/Image",
+            inputs=[
+                io.Int.Input("width", default=512, min=1, max=65536, step=1),
+                io.Int.Input("height", default=512, min=1, max=65536, step=1),
+                io.Combo.Input(
+                    "crop",
+                    options=[
                         "center",
                         "disabled",
                         "left",
@@ -31,33 +30,34 @@ class SuperResizeImage:
                         "bottom-right",
                     ],
                 ),
-                "cover": (
-                    "BOOLEAN",
-                    {
-                        "default": True,
-                        "tooltip": "False: crops a literal chunk of pixels from the source. True: Resizes the image to fit the dimensions while preserving aspect ratio, then crops.",
-                    },
+                io.Boolean.Input(
+                    "cover",
+                    default=True,
+                    tooltip="False: crops a literal chunk of pixels from the source. True: Resizes the image to fit the dimensions while preserving aspect ratio, then crops.",
                 ),
-                "upscale_method": (
-                    ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"],
+                io.Combo.Input(
+                    "upscale_method",
+                    options=[
+                        "nearest-exact",
+                        "bilinear",
+                        "area",
+                        "bicubic",
+                        "lanczos",
+                    ],
                 ),
-                "multiple_of": (
-                    "INT",
-                    {"default": 16, "min": 1, "max": 512, "step": 1},
-                ),
-            },
-            "optional": {
-                "image": ("IMAGE",),
-                "mask": ("MASK",),
-            },
-        }
+                io.Int.Input("multiple_of", default=16, min=1, max=512, step=1),
+                io.Image.Input("image", optional=True),
+                io.Mask.Input("mask", optional=True),
+            ],
+            outputs=[
+                io.Image.Output(display_name="IMAGE"),
+                io.Mask.Output(display_name="MASK"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE", "MASK")
-    FUNCTION = "resize"
-    CATEGORY = "SuperNodes/Image"
-
-    def resize(
-        self,
+    @classmethod
+    def execute(
+        cls,
         width: int,
         height: int,
         crop: str,
@@ -66,7 +66,7 @@ class SuperResizeImage:
         cover: bool,
         image: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> io.NodeOutput:
         if image is None and mask is None:
             raise ValueError(
                 "SuperResizeImage: You must provide either an image or a mask."
@@ -136,7 +136,7 @@ class SuperResizeImage:
                     device=image.device if image is not None else "cpu",
                 )
             )
-            return (out_image, out_mask)
+            return io.NodeOutput(out_image, out_mask)
 
         # Cropping (cover or viewport)
         if cover:
@@ -216,9 +216,7 @@ class SuperResizeImage:
             )
             out_mask = torch.zeros((B, final_h, final_w), device=device)
 
-        return (out_image, out_mask)
+        return io.NodeOutput(out_image, out_mask)
 
 
-NODE_CLASS_MAPPINGS = {"SuperResizeImage": SuperResizeImage}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperResizeImage": "🐧 Resize Image & Mask"}
+V3_NODES = [SuperResizeImage]

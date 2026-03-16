@@ -1,66 +1,67 @@
-class ImageSizeCalculator:
+from comfy_api.latest import io
+
+
+class ImageSizeCalculator(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "aspect_w": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 1,
-                        "max": 1024,
-                        "step": 1,
-                        "tooltip": "The width ratio of the desired aspect ratio (e.g., 16 for 16:9).",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="ImageSizeCalculator",
+            display_name="🐧 Image Size Calculator",
+            category="SuperNodes/Tools",
+            description="Calculates width and height based on an aspect ratio and a target dimension size, rounding to a specific multiple.",
+            inputs=[
+                io.Int.Input(
+                    "aspect_w",
+                    default=1,
+                    min=1,
+                    max=1024,
+                    step=1,
+                    tooltip="The width ratio of the desired aspect ratio (e.g., 16 for 16:9).",
                 ),
-                "aspect_h": (
-                    "INT",
-                    {
-                        "default": 1,
-                        "min": 1,
-                        "max": 1024,
-                        "step": 1,
-                        "tooltip": "The height ratio of the desired aspect ratio (e.g., 9 for 16:9).",
-                    },
+                io.Int.Input(
+                    "aspect_h",
+                    default=1,
+                    min=1,
+                    max=1024,
+                    step=1,
+                    tooltip="The height ratio of the desired aspect ratio (e.g., 9 for 16:9).",
                 ),
-                "mode": (
-                    ["max", "min"],
-                    {
-                        "tooltip": "Determines if the 'size' input applies to the largest (max) or smallest (min) dimension."
-                    },
+                io.Combo.Input(
+                    "mode",
+                    options=["max", "min"],
+                    tooltip="Determines if the 'size' input applies to the largest (max) or smallest (min) dimension.",
                 ),
-                "size": (
-                    "INT",
-                    {
-                        "default": 1024,
-                        "min": 1,
-                        "max": 32768,
-                        "step": 1,
-                        "tooltip": "The target length for the dimension specified by dimension mode.",
-                    },
+                io.Int.Input(
+                    "size",
+                    default=1024,
+                    min=1,
+                    max=32768,
+                    step=1,
+                    tooltip="The target length for the dimension specified by dimension mode.",
                 ),
-                "multiple_of": (
-                    "INT",
-                    {
-                        "default": 16,
-                        "min": 1,
-                        "max": 1024,
-                        "step": 1,
-                        "tooltip": "The final dimensions will be rounded to the nearest multiple of this value.",
-                    },
+                io.Int.Input(
+                    "multiple_of",
+                    default=16,
+                    min=1,
+                    max=1024,
+                    step=1,
+                    tooltip="The final dimensions will be rounded to the nearest multiple of this value.",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Int.Output(
+                    display_name="width", tooltip="The calculated width."
+                ),
+                io.Int.Output(
+                    display_name="height", tooltip="The calculated height."
+                ),
+            ],
+        )
 
-    RETURN_TYPES = ("INT", "INT")
-    RETURN_NAMES = ("width", "height")
-    OUTPUT_TOOLTIPS = ("The calculated width.", "The calculated height.")
-    FUNCTION = "calculate"
-
-    CATEGORY = "SuperNodes/Tools"
-    DESCRIPTION = "Calculates width and height based on an aspect ratio and a target dimension size, rounding to a specific multiple."
-
-    def calculate(self, aspect_w, aspect_h, mode, size, multiple_of):
+    @classmethod
+    def execute(
+        cls, aspect_w, aspect_h, mode, size, multiple_of
+    ) -> io.NodeOutput:
         # Calculate aspect ratio
         ratio = aspect_w / aspect_h
 
@@ -94,9 +95,7 @@ class ImageSizeCalculator:
         final_w = max(multiple_of, final_w)
         final_h = max(multiple_of, final_h)
 
-        return (final_w, final_h)
+        return io.NodeOutput(final_w, final_h)
 
 
-NODE_CLASS_MAPPINGS = {"ImageSizeCalculator": ImageSizeCalculator}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"ImageSizeCalculator": "🐧 Image Size Calculator"}
+V3_NODES = [ImageSizeCalculator]

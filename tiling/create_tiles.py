@@ -1,58 +1,55 @@
+from comfy_api.latest import io
 import torch
 
 
-class CreateTiles:
+class CreateTiles(io.ComfyNode):
     """
     Splits an image into a grid of tiles with configurable overlap.
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": (
-                    "IMAGE",
-                    {"tooltip": "The source image to be tiled."},
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SuperCreateTiles",
+            display_name="🐧 Create Tiles",
+            category="SuperNodes/Tiling",
+            inputs=[
+                io.Image.Input(
+                    "image", tooltip="The source image to be tiled."
                 ),
-                "rows": (
-                    "INT",
-                    {
-                        "default": 2,
-                        "min": 1,
-                        "max": 64,
-                        "step": 1,
-                        "tooltip": "Number of rows in the grid.",
-                    },
+                io.Int.Input(
+                    "rows",
+                    default=2,
+                    min=1,
+                    max=64,
+                    step=1,
+                    tooltip="Number of rows in the grid.",
                 ),
-                "cols": (
-                    "INT",
-                    {
-                        "default": 2,
-                        "min": 1,
-                        "max": 64,
-                        "step": 1,
-                        "tooltip": "Number of columns in the grid.",
-                    },
+                io.Int.Input(
+                    "cols",
+                    default=2,
+                    min=1,
+                    max=64,
+                    step=1,
+                    tooltip="Number of columns in the grid.",
                 ),
-                "overlap": (
-                    "FLOAT",
-                    {
-                        "default": 0.25,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "step": 0.05,
-                        "tooltip": "Overlap factor (0.0-1.0). 0.0 means distinct grid cells. 1.0 means the tile extends into adjacent cells by 50% of the grid size.",
-                    },
+                io.Float.Input(
+                    "overlap",
+                    default=0.25,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    tooltip="Overlap factor (0.0-1.0). 0.0 means distinct grid cells. 1.0 means the tile extends into adjacent cells by 50% of the grid size.",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Image.Output(display_name="tiles"),
+                io.Custom("STITCH_INFO").Output(display_name="stitch_info"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE", "STITCH_INFO")
-    RETURN_NAMES = ("tiles", "stitch_info")
-    FUNCTION = "execute"
-    CATEGORY = "SuperNodes/Tiling"
-
-    def execute(self, image, rows, cols, overlap):
+    @classmethod
+    def execute(cls, image, rows, cols, overlap) -> io.NodeOutput:
         # image shape: [B, H, W, C]
         batch_size, h, w, c = image.shape
 
@@ -135,9 +132,7 @@ class CreateTiles:
             "tiles": tile_coords,
         }
 
-        return (output_tiles, stitch_info)
+        return io.NodeOutput(output_tiles, stitch_info)
 
 
-NODE_CLASS_MAPPINGS = {"SuperCreateTiles": CreateTiles}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperCreateTiles": "🐧 Create Tiles"}
+V3_NODES = [CreateTiles]

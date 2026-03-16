@@ -1,10 +1,11 @@
 import re
 
 import comfy.utils
+from comfy_api.latest import io
 import torch
 
 
-class SuperPadImage:
+class SuperPadImage(io.ComfyNode):
     """
     Places an image onto an exact target canvas size and returns:
 
@@ -28,94 +29,84 @@ class SuperPadImage:
     ]
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE", {"tooltip": "The input image."}),
-                "target_width": (
-                    "INT",
-                    {
-                        "default": 1024,
-                        "min": 1,
-                        "max": 16384,
-                        "step": 1,
-                        "tooltip": "Final output width in pixels.",
-                    },
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="SuperPadImage",
+            display_name="🐧 Pad Image Scaled",
+            category="SuperNodes/Image",
+            inputs=[
+                io.Image.Input("image", tooltip="The input image."),
+                io.Int.Input(
+                    "target_width",
+                    default=1024,
+                    min=1,
+                    max=16384,
+                    step=1,
+                    tooltip="Final output width in pixels.",
                 ),
-                "target_height": (
-                    "INT",
-                    {
-                        "default": 1024,
-                        "min": 1,
-                        "max": 16384,
-                        "step": 1,
-                        "tooltip": "Final output height in pixels.",
-                    },
+                io.Int.Input(
+                    "target_height",
+                    default=1024,
+                    min=1,
+                    max=16384,
+                    step=1,
+                    tooltip="Final output height in pixels.",
                 ),
-                "shift_horizontal": (
-                    "FLOAT",
-                    {
-                        "default": 0.0,
-                        "min": -1.0,
-                        "max": 1.0,
-                        "step": 0.01,
-                        "tooltip": "Horizontal placement: -1 = far left, 0 = center, 1 = far right.",
-                    },
+                io.Float.Input(
+                    "shift_horizontal",
+                    default=0.0,
+                    min=-1.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Horizontal placement: -1 = far left, 0 = center, 1 = far right.",
                 ),
-                "shift_vertical": (
-                    "FLOAT",
-                    {
-                        "default": 0.0,
-                        "min": -1.0,
-                        "max": 1.0,
-                        "step": 0.01,
-                        "tooltip": "Vertical placement: -1 = bottom, 0 = center, 1 = top.",
-                    },
+                io.Float.Input(
+                    "shift_vertical",
+                    default=0.0,
+                    min=-1.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Vertical placement: -1 = bottom, 0 = center, 1 = top.",
                 ),
-                "scale_factor": (
-                    "FLOAT",
-                    {
-                        "default": 1.0,
-                        "min": 0.1,
-                        "max": 1.0,
-                        "step": 0.01,
-                        "tooltip": "Additional scale after fitting. 1.0 = normal fill. Smaller values shrink image to create padding.",
-                    },
+                io.Float.Input(
+                    "scale_factor",
+                    default=1.0,
+                    min=0.1,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Additional scale after fitting. 1.0 = normal fill. Smaller values shrink image to create padding.",
                 ),
-                "scale_method": (
-                    cls.upscale_methods,
-                    {
-                        "default": "nearest-exact",
-                        "tooltip": "Resampling method used for resizing.",
-                    },
+                io.Combo.Input(
+                    "scale_method",
+                    options=cls.upscale_methods,
+                    default="nearest-exact",
+                    tooltip="Resampling method used for resizing.",
                 ),
-                "color": (
-                    "STRING",
-                    {
-                        "default": "#808080",
-                        "multiline": False,
-                        "tooltip": "Padding color as hex (#RRGGBB, RRGGBB, #RGB, RGB). Invalid values default to white.",
-                    },
+                io.String.Input(
+                    "color",
+                    default="#808080",
+                    multiline=False,
+                    tooltip="Padding color as hex (#RRGGBB, RRGGBB, #RGB, RGB). Invalid values default to white.",
                 ),
-            }
-        }
+            ],
+            outputs=[
+                io.Image.Output(display_name="IMAGE"),
+                io.Mask.Output(display_name="MASK"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE", "MASK")
-    RETURN_NAMES = ("IMAGE", "MASK")
-    FUNCTION = "pad"
-    CATEGORY = "SuperNodes/Image"
-
-    def pad(
-        self,
+    @classmethod
+    def execute(
+        cls,
         image,
-        target_height,
         target_width,
+        target_height,
         shift_horizontal,
         shift_vertical,
         scale_factor,
         scale_method,
         color,
-    ):
+    ) -> io.NodeOutput:
         shift_horizontal = float(max(-1.0, min(1.0, shift_horizontal)))
         shift_vertical = float(max(-1.0, min(1.0, shift_vertical)))
         scale_factor = float(max(0.1, min(1.0, scale_factor)))
@@ -124,7 +115,7 @@ class SuperPadImage:
         device = image.device
         dtype = image.dtype
 
-        pad_rgb = self._parse_hex_color(color)
+        pad_rgb = cls._parse_hex_color(color)
 
         # Contain scale
         contain_scale = min(target_width / w, target_height / h)
@@ -135,7 +126,7 @@ class SuperPadImage:
         fw = min(target_width, max(1, int(round(cw * scale_factor))))
         fh = min(target_height, max(1, int(round(ch * scale_factor))))
 
-        resized = self._resize(image[..., :3], fw, fh, scale_method)
+        resized = cls._resize(image[..., :3], fw, fh, scale_method)
 
         canvas = torch.empty(
             (b, target_height, target_width, 3), device=device, dtype=dtype
@@ -160,14 +151,16 @@ class SuperPadImage:
         canvas[:, y1:y2, x1:x2] = resized
         mask[:, y1:y2, x1:x2] = 0.0
 
-        return (canvas, mask)
+        return io.NodeOutput(canvas, mask)
 
-    def _resize(self, img, w, h, method):
+    @classmethod
+    def _resize(cls, img, w, h, method):
         samples = img.movedim(-1, 1)
         out = comfy.utils.common_upscale(samples, w, h, method, "disabled")
         return out.movedim(1, -1)
 
-    def _parse_hex_color(self, value):
+    @classmethod
+    def _parse_hex_color(cls, value):
         if not isinstance(value, str):
             return (1.0, 1.0, 1.0)
 
@@ -188,6 +181,4 @@ class SuperPadImage:
         )
 
 
-NODE_CLASS_MAPPINGS = {"SuperPadImage": SuperPadImage}
-
-NODE_DISPLAY_NAME_MAPPINGS = {"SuperPadImage": "🐧 Pad Image Scaled"}
+V3_NODES = [SuperPadImage]
