@@ -4,11 +4,11 @@ from comfy_api.latest import io
 class SuperConcatenateMulti(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
-        autogrow_template = io.Autogrow.TemplatePrefix(
+        names = [f"text_{chr(i)}" for i in range(ord("a"), ord("z") + 1)]
+        autogrow_template = io.Autogrow.TemplateNames(
             input=io.String.Input("text", force_input=True),
-            prefix="text_",
+            names=names,
             min=1,
-            max=io.Autogrow._MaxNames,
         )
 
         return io.Schema(
@@ -31,7 +31,6 @@ class SuperConcatenateMulti(io.ComfyNode):
         # Replace literal backslash-n with actual newlines
         delimiter = delimiter.replace("\\n", "\n")
 
-        # texts is a dict mapping input names ('text_0', 'text_1') to their values
         text_values = list(texts.values())
 
         # Filter out empty strings
