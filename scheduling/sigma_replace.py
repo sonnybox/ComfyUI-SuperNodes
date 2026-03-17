@@ -72,4 +72,4 @@ class SigmaReplace(io.ComfyNode):
         return io.NodeOutput(s)
 
 
-V3_NODES = [SigmaReplace]
+NODE = [SigmaReplace]

@@ -135,4 +135,4 @@ class CreateTiles(io.ComfyNode):
         return io.NodeOutput(output_tiles, stitch_info)
 
 
-V3_NODES = [CreateTiles]
+NODE = [CreateTiles]

@@ -181,4 +181,4 @@ class SuperPadImage(io.ComfyNode):
         )
 
 
-V3_NODES = [SuperPadImage]
+NODE = [SuperPadImage]

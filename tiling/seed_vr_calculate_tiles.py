@@ -102,4 +102,4 @@ class SeedVRCalculateTiles(io.ComfyNode):
         return io.NodeOutput(rows, cols, overlap)
 
 
-V3_NODES = [SeedVRCalculateTiles]
+NODE = [SeedVRCalculateTiles]

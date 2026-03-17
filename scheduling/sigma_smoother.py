@@ -91,4 +91,4 @@ class SigmaSmoother(io.ComfyNode):
         return io.NodeOutput(result_sigmas)
 
 
-V3_NODES = [SigmaSmoother]
+NODE = [SigmaSmoother]

@@ -64,4 +64,4 @@ class SigmasRescale(io.ComfyNode):
         return io.NodeOutput(new_sigmas)
 
 
-V3_NODES = [SigmasRescale]
+NODE = [SigmasRescale]

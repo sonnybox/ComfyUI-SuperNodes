@@ -219,4 +219,4 @@ class SuperResizeImage(io.ComfyNode):
         return io.NodeOutput(out_image, out_mask)
 
 
-V3_NODES = [SuperResizeImage]
+NODE = [SuperResizeImage]

@@ -63,4 +63,4 @@ class SuperColorAdjustAllInOne(io.ComfyNode):
         return io.NodeOutput(out)
 
 
-V3_NODES = [SuperColorAdjustAllInOne]
+NODE = [SuperColorAdjustAllInOne]

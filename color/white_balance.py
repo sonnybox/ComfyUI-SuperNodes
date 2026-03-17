@@ -30,4 +30,4 @@ class SuperWhiteBalanceCAT(io.ComfyNode):
         return io.NodeOutput(out)
 
 
-V3_NODES = [SuperWhiteBalanceCAT]
+NODE = [SuperWhiteBalanceCAT]

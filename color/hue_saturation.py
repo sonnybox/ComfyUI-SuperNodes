@@ -31,4 +31,4 @@ class SuperHueSaturation(io.ComfyNode):
         )
 
 
-V3_NODES = [SuperHueSaturation]
+NODE = [SuperHueSaturation]

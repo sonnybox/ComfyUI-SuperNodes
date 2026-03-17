@@ -77,4 +77,4 @@ class FaceBBoxToMask(io.ComfyNode):
         return io.NodeOutput(masks)
 
 
-V3_NODES = [FaceBBoxToMask]
+NODE = [FaceBBoxToMask]

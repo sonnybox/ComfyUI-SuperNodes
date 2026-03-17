@@ -43,4 +43,4 @@ class SuperListRandomizer(io.ComfyNode):
         return io.NodeOutput(result)
 
 
-V3_NODES = [SuperListRandomizer]
+NODE = [SuperListRandomizer]

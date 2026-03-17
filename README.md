@@ -40,3 +40,5 @@
 * **Model Downloader**
 * **Set Reserve VRAM**
 * **Show Error Message**: Halts the ComfyUI pipeline execution with a custom error message
+* **List Randomizer**: Selects a word or phrase from a string list
+* **Concatenate Multi**: Concatenate multiple strings in one node

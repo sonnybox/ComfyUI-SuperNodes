@@ -85,4 +85,4 @@ class SigmasGraph(io.ComfyNode):
         )
 
 
-V3_NODES = [SigmasGraph]
+NODE = [SigmasGraph]

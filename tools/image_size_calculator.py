@@ -98,4 +98,4 @@ class ImageSizeCalculator(io.ComfyNode):
         return io.NodeOutput(final_w, final_h)
 
 
-V3_NODES = [ImageSizeCalculator]
+NODE = [ImageSizeCalculator]

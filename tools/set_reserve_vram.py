@@ -33,4 +33,4 @@ class SetReserveVRAM(io.ComfyNode):
         return io.NodeOutput(any)
 
 
-V3_NODES = [SetReserveVRAM]
+NODE = [SetReserveVRAM]

@@ -36,4 +36,4 @@ class SuperBrightnessContrast(io.ComfyNode):
         )
 
 
-V3_NODES = [SuperBrightnessContrast]
+NODE = [SuperBrightnessContrast]

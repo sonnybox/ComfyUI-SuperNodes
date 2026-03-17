@@ -91,4 +91,4 @@ class GetCommonAspectRatio(io.ComfyNode):
         return io.NodeOutput(final_w, final_h)
 
 
-V3_NODES = [GetCommonAspectRatio]
+NODE = [GetCommonAspectRatio]

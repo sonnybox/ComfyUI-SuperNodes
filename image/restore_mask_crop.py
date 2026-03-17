@@ -256,4 +256,4 @@ class RestoreMaskCrop(io.ComfyNode):
         return io.NodeOutput(out_image)
 
 
-V3_NODES = [RestoreMaskCrop]
+NODE = [RestoreMaskCrop]

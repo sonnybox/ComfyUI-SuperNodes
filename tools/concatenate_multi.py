@@ -7,7 +7,8 @@ class SuperConcatenateMulti(io.ComfyNode):
         autogrow_template = io.Autogrow.TemplatePrefix(
             input=io.String.Input("text", force_input=True),
             prefix="text_",
-            min=2,
+            min=1,
+            max=io.Autogrow._MaxNames,
         )
 
         return io.Schema(
@@ -15,8 +16,8 @@ class SuperConcatenateMulti(io.ComfyNode):
             display_name="🐧 Concatenate Multi",
             category="SuperNodes/Tools",
             inputs=[
+                io.String.Input("delimiter", force_input=True),
                 io.Autogrow.Input("texts", template=autogrow_template),
-                io.String.Input("delimiter", default=", "),
             ],
             outputs=[
                 io.String.Output(display_name="text"),
@@ -25,8 +26,11 @@ class SuperConcatenateMulti(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls, texts: io.Autogrow.Type, delimiter: str, **kwargs
+        cls, delimiter: str, texts: io.Autogrow.Type, **kwargs
     ) -> io.NodeOutput:
+        # Replace literal backslash-n with actual newlines
+        delimiter = delimiter.replace("\\n", "\n")
+
         # texts is a dict mapping input names ('text_0', 'text_1') to their values
         text_values = list(texts.values())
 
@@ -36,4 +40,4 @@ class SuperConcatenateMulti(io.ComfyNode):
         return io.NodeOutput(delimiter.join(filtered))
 
 
-V3_NODES = [SuperConcatenateMulti]
+NODE = [SuperConcatenateMulti]

@@ -34,4 +34,4 @@ class SuperStopExecution(io.ComfyNode):
         return io.NodeOutput()
 
 
-V3_NODES = [SuperStopExecution]
+NODE = [SuperStopExecution]

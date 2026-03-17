@@ -135,4 +135,4 @@ class StitchTiles(io.ComfyNode):
         return io.NodeOutput(final_image)
 
 
-V3_NODES = [StitchTiles]
+NODE = [StitchTiles]

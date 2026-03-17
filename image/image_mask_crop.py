@@ -152,4 +152,4 @@ class ImageMaskCrop(io.ComfyNode):
         return io.NodeOutput(cropped_image, cropped_mask, uncrop_info)
 
 
-V3_NODES = [ImageMaskCrop]
+NODE = [ImageMaskCrop]

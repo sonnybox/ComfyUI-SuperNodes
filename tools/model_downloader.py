@@ -195,4 +195,4 @@ class SuperModelDownloader(io.ComfyNode):
         return io.NodeOutput(filename)
 
 
-V3_NODES = [SuperModelDownloader]
+NODE = [SuperModelDownloader]
