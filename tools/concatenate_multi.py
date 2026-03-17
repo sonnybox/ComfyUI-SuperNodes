@@ -16,7 +16,9 @@ class SuperConcatenateMulti(io.ComfyNode):
             display_name="🐧 Concatenate Multi",
             category="SuperNodes/Tools",
             inputs=[
-                io.String.Input("delimiter", force_input=True),
+                io.String.Input(
+                    "delimiter", force_input=True
+                ),  # required to be forced input due to scramble bug
                 io.Autogrow.Input("texts", template=autogrow_template),
             ],
             outputs=[
