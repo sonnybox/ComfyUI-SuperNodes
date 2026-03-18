@@ -29,9 +29,9 @@
 
 ### Tiling
 
-* **Create Tiles**
+* **Color Match Tiling**: Luminance color match
+* **Luminance Preprocess**: Grayscale based on luminance
 * **Seed VR Calculate Tiles**: Probably useless
-* **Stitch Tiles**: Merges processed tiles back into one image
 
 ### Tools
 
