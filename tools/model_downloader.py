@@ -151,16 +151,21 @@ class SuperModelDownloader(io.ComfyNode):
         dest_path = os.path.join(dest_dir, filename)
 
         is_alias = bool(alias.strip())
+        total_size = int(response.headers.get("content-length", 0))
+        response_etag = response.headers.get("etag")
+        response_last_modified = response.headers.get("last-modified")
+
         if is_alias and os.path.exists(dest_path):
+            existing_final_size = os.path.getsize(dest_path)
+            if total_size > 0 and existing_final_size == total_size:
+                print(f"✅ File {filename} already exists. Skipping download")
+                return io.NodeOutput(filename)
             raise ValueError(
                 f"Alias '{alias.strip()}' is already taken in '{destination}' as '{filename}'. Please choose a different alias or remove the existing file first."
             )
 
         active_dest_path = f"{dest_path}.part" if is_alias else dest_path
 
-        total_size = int(response.headers.get("content-length", 0))
-        response_etag = response.headers.get("etag")
-        response_last_modified = response.headers.get("last-modified")
         existing_size = (
             os.path.getsize(active_dest_path)
             if os.path.exists(active_dest_path)
