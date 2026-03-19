@@ -67,6 +67,18 @@ class SuperModelDownloader(io.ComfyNode):
         if not url.strip():
             raise ValueError("No URL provided.")
 
+        valid_extensions = [".safetensors", ".pth"]
+        alias_input = alias.strip()
+        alias_raw_name = ""
+        alias_base = ""
+        if alias_input:
+            alias_raw_name = os.path.basename(alias_input)
+            alias_base = os.path.splitext(alias_raw_name)[0]
+            if not alias_base:
+                raise ValueError(
+                    "Alias is invalid. Please provide a non-empty filename."
+                )
+
         headers = {}
 
         # --------------------------------------------------------------------
@@ -105,6 +117,52 @@ class SuperModelDownloader(io.ComfyNode):
 
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
+            is_offline = isinstance(
+                e,
+                (
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout,
+                ),
+            )
+            if is_offline:
+                if not alias_base:
+                    raise RuntimeError(
+                        "Offline: cannot reach model URL and no alias was provided to assume an existing local file."
+                    )
+
+                dest_dirs = folder_paths.get_folder_paths(destination)
+                if not dest_dirs:
+                    raise ValueError(
+                        f"Invalid destination folder: {destination}"
+                    )
+
+                dest_dir = dest_dirs[0]
+                os.makedirs(dest_dir, exist_ok=True)
+
+                alias_ext = os.path.splitext(alias_raw_name)[1].lower()
+                if alias_ext in valid_extensions:
+                    assumed_filename = f"{alias_base}{alias_ext}"
+                else:
+                    candidate_filenames = [
+                        f"{alias_base}{ext}"
+                        for ext in valid_extensions
+                        if os.path.exists(
+                            os.path.join(dest_dir, f"{alias_base}{ext}")
+                        )
+                    ]
+                    if len(candidate_filenames) == 1:
+                        assumed_filename = candidate_filenames[0]
+                    elif len(candidate_filenames) > 1:
+                        raise ValueError(
+                            f"Offline and alias '{alias_input}' matches multiple local files in '{destination}'. Please include the extension in alias to disambiguate."
+                        )
+                    else:
+                        assumed_filename = f"{alias_base}{valid_extensions[0]}"
+
+                print(
+                    f"⚠️ Offline detected. Assuming model '{assumed_filename}' is already available locally"
+                )
+                return io.NodeOutput(assumed_filename)
             raise RuntimeError(f"{e}")
 
         # Extract filename from Content-Disposition header, fallback to URL parsing
@@ -123,21 +181,15 @@ class SuperModelDownloader(io.ComfyNode):
         # --------------------------------------------------------------------
         # 3. FILE EXTENSION VALIDATION
         # --------------------------------------------------------------------
-        valid_extensions = {".safetensors", ".pth"}
+        valid_extensions_set = set(valid_extensions)
         ext = os.path.splitext(filename)[1].lower()
-        if ext not in valid_extensions:
+        if ext not in valid_extensions_set:
             raise ValueError(
                 f"File type '{ext}' is not supported. Only .safetensors and .pth files are allowed."
             )
 
-        if alias.strip():
-            alias_name = os.path.basename(alias.strip())
-            alias_name = os.path.splitext(alias_name)[0]
-            if not alias_name:
-                raise ValueError(
-                    "Alias is invalid. Please provide a non-empty filename."
-                )
-            filename = f"{alias_name}{ext}"
+        if alias_base:
+            filename = f"{alias_base}{ext}"
 
         # --------------------------------------------------------------------
         # 4. DESTINATION & RESUME LOGIC
@@ -150,7 +202,7 @@ class SuperModelDownloader(io.ComfyNode):
         os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, filename)
 
-        is_alias = bool(alias.strip())
+        is_alias = bool(alias_base)
         total_size = int(response.headers.get("content-length", 0))
         response_etag = response.headers.get("etag")
         response_last_modified = response.headers.get("last-modified")
@@ -161,7 +213,7 @@ class SuperModelDownloader(io.ComfyNode):
                 print(f"✅ File {filename} already exists. Skipping download")
                 return io.NodeOutput(filename)
             raise ValueError(
-                f"Alias '{alias.strip()}' is already taken in '{destination}' as '{filename}'. Please choose a different alias or remove the existing file first."
+                f"Alias '{alias_input}' is already taken in '{destination}' as '{filename}'. Please choose a different alias or remove the existing file first."
             )
 
         active_dest_path = f"{dest_path}.part" if is_alias else dest_path
