@@ -32,6 +32,12 @@ class SuperModelDownloader(io.ComfyNode):
                     tooltip="Select the destination folder (e.g., checkpoints, loras).",
                 ),
                 io.String.Input(
+                    "alias",
+                    default="",
+                    optional=True,
+                    tooltip="Optional custom output name without extension. The original file extension is always preserved.",
+                ),
+                io.String.Input(
                     "civitai_api_key",
                     default="",
                     optional=True,
@@ -51,7 +57,12 @@ class SuperModelDownloader(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls, url, destination, civitai_api_key="", huggingface_api_key=""
+        cls,
+        url,
+        destination,
+        alias="",
+        civitai_api_key="",
+        huggingface_api_key="",
     ) -> io.NodeOutput:
         if not url.strip():
             raise ValueError("No URL provided.")
@@ -119,6 +130,15 @@ class SuperModelDownloader(io.ComfyNode):
                 f"File type '{ext}' is not supported. Only .safetensors and .pth files are allowed."
             )
 
+        if alias.strip():
+            alias_name = os.path.basename(alias.strip())
+            alias_name = os.path.splitext(alias_name)[0]
+            if not alias_name:
+                raise ValueError(
+                    "Alias is invalid. Please provide a non-empty filename."
+                )
+            filename = f"{alias_name}{ext}"
+
         # --------------------------------------------------------------------
         # 4. DESTINATION & RESUME LOGIC
         # --------------------------------------------------------------------
@@ -130,9 +150,21 @@ class SuperModelDownloader(io.ComfyNode):
         os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, filename)
 
+        is_alias = bool(alias.strip())
+        if is_alias and os.path.exists(dest_path):
+            raise ValueError(
+                f"Alias '{alias.strip()}' is already taken in '{destination}' as '{filename}'. Please choose a different alias or remove the existing file first."
+            )
+
+        active_dest_path = f"{dest_path}.part" if is_alias else dest_path
+
         total_size = int(response.headers.get("content-length", 0))
+        response_etag = response.headers.get("etag")
+        response_last_modified = response.headers.get("last-modified")
         existing_size = (
-            os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+            os.path.getsize(active_dest_path)
+            if os.path.exists(active_dest_path)
+            else 0
         )
 
         file_mode = "wb"
@@ -140,17 +172,57 @@ class SuperModelDownloader(io.ComfyNode):
 
         if existing_size > 0:
             if total_size > 0 and existing_size == total_size:
-                print(f"✅ File {filename} already exists. Skipping download")
+                if is_alias:
+                    os.replace(active_dest_path, dest_path)
+                    print(f"✅ File {filename} already exists. Finalized alias")
+                else:
+                    print(
+                        f"✅ File {filename} already exists. Skipping download"
+                    )
                 return io.NodeOutput(filename)
             elif total_size > 0 and existing_size < total_size:
-                print(f"⚠️ Resuming incomplete download for {filename}")
-                headers["Range"] = f"bytes={existing_size}-"
-                response = requests.get(
-                    url, stream=True, headers=headers, allow_redirects=True
-                )
-                response.raise_for_status()
-                file_mode = "ab"
-                initial_pos = existing_size
+                if response_etag or response_last_modified:
+                    print(f"⚠️ Resuming incomplete download for {filename}")
+                    resume_headers = dict(headers)
+                    resume_headers["Range"] = f"bytes={existing_size}-"
+                    resume_headers["If-Range"] = (
+                        response_etag
+                        if response_etag
+                        else response_last_modified
+                    )
+                    resume_response = requests.get(
+                        url,
+                        stream=True,
+                        headers=resume_headers,
+                        allow_redirects=True,
+                    )
+
+                    if resume_response.status_code == 401:
+                        raise RuntimeError(
+                            "Error 401 Unauthorized. Your API key is invalid or you need to accept the model terms on HuggingFace."
+                        )
+
+                    if resume_response.status_code == 206:
+                        response = resume_response
+                        file_mode = "ab"
+                        initial_pos = existing_size
+                    elif resume_response.status_code == 200:
+                        # If-Range failed because remote file changed; restart from byte 0.
+                        print(
+                            f"⚠️ Remote file changed for {filename}. Restarting full download"
+                        )
+                        response = resume_response
+                        file_mode = "wb"
+                        initial_pos = 0
+                        total_size = int(
+                            response.headers.get("content-length", 0)
+                        )
+                    else:
+                        resume_response.raise_for_status()
+                else:
+                    print(
+                        f"⚠️ Cannot safely resume {filename} (no ETag/Last-Modified). Restarting full download"
+                    )
             else:
                 print(
                     f"⚠️ Existing file size mismatch. Redownloading {filename}"
@@ -166,7 +238,7 @@ class SuperModelDownloader(io.ComfyNode):
 
         print(f"⬇️ Downloading: {filename} to {destination}")
 
-        with open(dest_path, file_mode) as f:
+        with open(active_dest_path, file_mode) as f:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
                 comfy.model_management.throw_exception_if_processing_interrupted()
 
@@ -190,6 +262,9 @@ class SuperModelDownloader(io.ComfyNode):
                             f"{dl_mb:.2f}/{tot_mb:.2f} MB ({speed_mb:.2f} MB/s)"
                         )
                         last_print_time = current_time
+
+        if is_alias:
+            os.replace(active_dest_path, dest_path)
 
         print(f"✅ Downloaded {filename}")
         return io.NodeOutput(filename)

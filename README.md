@@ -29,7 +29,7 @@
 
 ### Tiling
 
-* **Color Match Tiling**: Luminance color match
+* **Color Match Luminance**: Luminance color match
 * **Luminance Preprocess**: Grayscale based on luminance
 * **Seed VR Calculate Tiles**: Probably useless
 

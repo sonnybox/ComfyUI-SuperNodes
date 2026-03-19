@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from .utils import lab_to_rgb, rgb_to_lab
 
 
-class ColorMatchTiling(io.ComfyNode):
+class ColorMatchLuminance(io.ComfyNode):
     """
     Performs a luminance swap to fix color shifts after tiled upscaling.
     Takes L channel from the target image and matches A/B from reference.
@@ -14,8 +14,8 @@ class ColorMatchTiling(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="SuperColorMatchTiling",
-            display_name="🐧 Color Match Tiling",
+            node_id="SuperColorMatchLuminance",
+            display_name="🐧 Color Match Luminance",
             category="SuperNodes/Tiling",
             inputs=[
                 io.Image.Input("target", tooltip="The upscaled image."),
@@ -68,4 +68,4 @@ class ColorMatchTiling(io.ComfyNode):
         return io.NodeOutput(final_image)
 
 
-NODE = [ColorMatchTiling]
+NODE = [ColorMatchLuminance]
