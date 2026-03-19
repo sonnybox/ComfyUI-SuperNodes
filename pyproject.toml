@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-supernodes"
 description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
-version = "0.2.5"
+version = "0.2.6"
 license = { file = "LICENSE" } 
 
 [project.urls]
