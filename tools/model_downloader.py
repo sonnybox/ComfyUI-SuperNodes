@@ -67,7 +67,7 @@ class SuperModelDownloader(io.ComfyNode):
         if not url.strip():
             raise ValueError("No URL provided.")
 
-        valid_extensions = [".safetensors", ".pth"]
+        valid_extensions = [".safetensors", ".pth", ".onnx"]
         alias_input = alias.strip()
         alias_raw_name = ""
         alias_base = ""

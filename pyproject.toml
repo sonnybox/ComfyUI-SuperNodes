@@ -1,16 +1,14 @@
 [project]
 name = "comfyui-supernodes"
 description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
-version = "0.2.7"
+version = "0.2.8"
 license = { file = "LICENSE" } 
+dependencies  = ["matplotlib"]
 
 [project.urls]
 Repository = "https://github.com/sonnybox/ComfyUI-SuperNodes"
-# Documentation = "https://github.com/sonnybox/ComfyUI-SuperNodes/wiki"
-"Bug Tracker" = "https://github.com/sonnybox/ComfyUI-SuperNodes/issues"
 
 [tool.comfy]
 PublisherId = "sonnybox"
 DisplayName = "ComfyUI-SuperNodes"
 Icon = "https://raw.githubusercontent.com/sonnybox/ComfyUI-SuperNodes/refs/heads/main/logo.png"
-dependencies  = ["matplotlib"]
