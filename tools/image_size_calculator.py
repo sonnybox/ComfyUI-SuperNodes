@@ -1,4 +1,5 @@
 from comfy_api.latest import io
+import math
 
 
 class ImageSizeCalculator(io.ComfyNode):
@@ -28,8 +29,8 @@ class ImageSizeCalculator(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "mode",
-                    options=["max", "min"],
-                    tooltip="Determines if the 'size' input applies to the largest (max) or smallest (min) dimension.",
+                    options=["max", "min", "megapixels"],
+                    tooltip="Determines if the size applies to max/min dimension, or if target is total megapixels.",
                 ),
                 io.Int.Input(
                     "size",
@@ -38,6 +39,14 @@ class ImageSizeCalculator(io.ComfyNode):
                     max=32768,
                     step=1,
                     tooltip="The target length for the dimension specified by dimension mode.",
+                ),
+                io.Float.Input(
+                    "megapixels",
+                    default=1.00,
+                    min=0.01,
+                    max=1024.0,
+                    step=0.01,
+                    tooltip="The target total megapixels when mode is 'megapixels'.",
                 ),
                 io.Int.Input(
                     "multiple_of",
@@ -60,7 +69,7 @@ class ImageSizeCalculator(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls, aspect_w, aspect_h, mode, size, multiple_of
+        cls, aspect_w, aspect_h, mode, size, megapixels, multiple_of
     ) -> io.NodeOutput:
         # Calculate aspect ratio
         ratio = aspect_w / aspect_h
@@ -77,7 +86,7 @@ class ImageSizeCalculator(io.ComfyNode):
                 # Height is the longest side
                 target_h = size
                 target_w = size * ratio
-        else:  # mode == "min"
+        elif mode == "min":
             if aspect_w <= aspect_h:
                 # Width is the shortest side
                 target_w = size
@@ -86,6 +95,13 @@ class ImageSizeCalculator(io.ComfyNode):
                 # Height is the shortest side
                 target_h = size
                 target_w = size * ratio
+        elif mode == "megapixels":
+            target_pixels = megapixels * 1_000_000
+            # target_w * target_h = target_pixels
+            # target_w = target_h * ratio
+            # (target_h * ratio) * target_h = target_pixels
+            target_h = math.sqrt(target_pixels / ratio)
+            target_w = target_h * ratio
 
         # Round to nearest multiple
         final_w = int(round(target_w / multiple_of)) * multiple_of
