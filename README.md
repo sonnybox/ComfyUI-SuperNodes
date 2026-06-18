@@ -27,6 +27,7 @@
 * **Sigmas Graph**: Graph the sigma curve
 * **Sigmas Rescale**: Rescales a sigma curve
 * **Sigma Remove**: Remove a sigma at the specified index
+* **Sigma Insert**: Add a sigma at the specified index
 
 ### Tiling
 
