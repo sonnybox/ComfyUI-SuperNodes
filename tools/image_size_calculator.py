@@ -1,5 +1,6 @@
-from comfy_api.latest import io
 import math
+
+from comfy_api.latest import io
 
 
 class ImageSizeCalculator(io.ComfyNode):
@@ -29,7 +30,7 @@ class ImageSizeCalculator(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "mode",
-                    options=["max", "min", "megapixels"],
+                    options=["max_size", "min_size", "megapixels"],
                     tooltip="Determines if the size applies to max/min dimension, or if target is total megapixels.",
                 ),
                 io.Int.Input(
@@ -64,6 +65,13 @@ class ImageSizeCalculator(io.ComfyNode):
                 io.Int.Output(
                     display_name="height", tooltip="The calculated height."
                 ),
+                io.Int.Output(
+                    display_name="aspect_w", tooltip="Passthrough width aspect."
+                ),
+                io.Int.Output(
+                    display_name="aspect_h",
+                    tooltip="Passthrough height aspect.",
+                ),
             ],
         )
 
@@ -77,7 +85,7 @@ class ImageSizeCalculator(io.ComfyNode):
         target_w = 0.0
         target_h = 0.0
 
-        if mode == "max":
+        if mode == "max_size":
             if aspect_w >= aspect_h:
                 # Width is the longest side
                 target_w = size
@@ -86,7 +94,7 @@ class ImageSizeCalculator(io.ComfyNode):
                 # Height is the longest side
                 target_h = size
                 target_w = size * ratio
-        elif mode == "min":
+        elif mode == "min_size":
             if aspect_w <= aspect_h:
                 # Width is the shortest side
                 target_w = size
@@ -96,10 +104,7 @@ class ImageSizeCalculator(io.ComfyNode):
                 target_h = size
                 target_w = size * ratio
         elif mode == "megapixels":
-            target_pixels = megapixels * 1_000_000
-            # target_w * target_h = target_pixels
-            # target_w = target_h * ratio
-            # (target_h * ratio) * target_h = target_pixels
+            target_pixels = megapixels * 1024 * 1024
             target_h = math.sqrt(target_pixels / ratio)
             target_w = target_h * ratio
 
@@ -111,7 +116,7 @@ class ImageSizeCalculator(io.ComfyNode):
         final_w = max(multiple_of, final_w)
         final_h = max(multiple_of, final_h)
 
-        return io.NodeOutput(final_w, final_h)
+        return io.NodeOutput(final_w, final_h, aspect_w, aspect_h)
 
 
 NODE = [ImageSizeCalculator]
