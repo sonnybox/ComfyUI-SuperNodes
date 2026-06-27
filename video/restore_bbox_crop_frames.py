@@ -97,7 +97,7 @@ class RestoreBBoxCropFrames(io.ComfyNode):
                 io.Mask.Input(
                     "mask",
                     optional=True,
-                    tooltip="Optional square feather mask, resized to each true bbox for blending.",
+                    tooltip="Optional square feather mask, resized to each true bbox for blending. Provide exactly 1 mask (shared by all frames) or one mask per frame.",
                 ),
             ],
             outputs=[
@@ -118,6 +118,14 @@ class RestoreBBoxCropFrames(io.ComfyNode):
         out = background_frames.clone()
         info_frames = restore_info.get("frames", [])
         n = min(B, len(info_frames), cropped_frames.shape[0])
+
+        # The feather mask must be either a single mask (shared by every frame) or
+        # one mask per cropped frame (used individually per frame).
+        if mask is not None and mask.shape[0] not in (1, cropped_frames.shape[0]):
+            raise ValueError(
+                "mask batch size must be exactly 1 or equal to the frame count "
+                f"({cropped_frames.shape[0]}), got {mask.shape[0]}."
+            )
 
         for i in range(n):
             entry = info_frames[i]
@@ -156,7 +164,8 @@ class RestoreBBoxCropFrames(io.ComfyNode):
             oy1 = iy1 - cy1
             if iw > 0 and ih > 0:
                 if mask is not None:
-                    m = mask[min(i, mask.shape[0] - 1)].unsqueeze(0).to(out.device)
+                    m_idx = 0 if mask.shape[0] == 1 else i
+                    m = mask[m_idx].unsqueeze(0).to(out.device)
                     m = _resize_tensor(m, iw, ih, scale_method, is_mask=True).clamp(
                         0.0, 1.0
                     )
