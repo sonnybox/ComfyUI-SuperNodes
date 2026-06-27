@@ -94,6 +94,14 @@ class GetBBoxCropFrames(io.ComfyNode):
                     tooltip="If true, pad the common crop size to a square (max of width/height).",
                 ),
                 io.Int.Input(
+                    "padding",
+                    default=0,
+                    min=0,
+                    max=4096,
+                    step=1,
+                    tooltip="Grow each bbox by this many pixels on all sides (clamped to the frame). Useful to leave room to feather outside the detection.",
+                ),
+                io.Int.Input(
                     "multiple_of",
                     default=16,
                     min=1,
@@ -125,13 +133,15 @@ class GetBBoxCropFrames(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, bboxes, frames, square, multiple_of, pad_mode, pad_color) -> io.NodeOutput:
+    def execute(cls, bboxes, frames, square, padding, multiple_of, pad_mode, pad_color) -> io.NodeOutput:
         B, H, W, C = frames.shape
         device = frames.device
         dtype = frames.dtype
         pad_color_t = _parse_pad_color(pad_color, C, device, dtype)
 
-        # 1. Normalize bboxes: clamp to frame, drop degenerate ones (treat as None).
+        # 1. Normalize bboxes: grow by padding, clamp to frame, drop degenerate ones.
+        #    The padded box becomes the recorded "true" bbox so restoration can
+        #    feather across the padded region (outside the original detection).
         norm = []
         for i in range(B):
             bbox = bboxes[i] if bboxes is not None and i < len(bboxes) else None
@@ -141,6 +151,10 @@ class GetBBoxCropFrames(io.ComfyNode):
             x1, y1, x2, y2 = (int(round(float(v))) for v in bbox)
             x1, x2 = sorted((x1, x2))
             y1, y2 = sorted((y1, y2))
+            x1 -= padding
+            y1 -= padding
+            x2 += padding
+            y2 += padding
             x1 = max(0, min(W, x1))
             x2 = max(0, min(W, x2))
             y1 = max(0, min(H, y1))

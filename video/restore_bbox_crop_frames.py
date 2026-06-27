@@ -113,17 +113,18 @@ class RestoreBBoxCropFrames(io.ComfyNode):
         cls, background_frames, cropped_frames, restore_info, scale_method, mask=None
     ) -> io.NodeOutput:
         B, bgH, bgW, C = background_frames.shape
+        # Output the entire background sequence; only frames that have a matching
+        # crop get composited over. Extra background frames pass through untouched.
         out = background_frames.clone()
         info_frames = restore_info.get("frames", [])
+        n = min(B, len(info_frames), cropped_frames.shape[0])
 
-        for i in range(B):
-            if i >= len(info_frames):
-                break
+        for i in range(n):
             entry = info_frames[i]
             if entry.get("bbox") is None or entry.get("crop_box") is None:
                 continue  # No bbox for this frame — leave background untouched.
 
-            crop = cropped_frames[min(i, cropped_frames.shape[0] - 1)].unsqueeze(0)
+            crop = cropped_frames[i].unsqueeze(0)
 
             orig_h, orig_w = entry["original_size"]
             sx = bgW / orig_w
