@@ -3,3 +3,5 @@ __pycache__/
 .ruff_cache/
 .vscode/
 .pytest_cache/
+pyrefly.toml
+venv/

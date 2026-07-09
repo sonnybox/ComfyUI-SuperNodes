@@ -81,7 +81,7 @@ class RestoreBBoxCropFrames(io.ComfyNode):
                 ),
                 io.Custom("BBOX_RESTORE_INFO").Input(
                     "restore_info",
-                    tooltip="Crop metadata produced by Get BBox Crop Frames.",
+                    tooltip="Crop metadata produced by Get Video Crop Frames.",
                 ),
                 io.Combo.Input(
                     "scale_method",
