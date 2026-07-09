@@ -25,16 +25,14 @@ def _round_up(value, multiple):
     return int(((value + multiple - 1) // multiple) * multiple)
 
 
-def _extract_window(frame, x1, y1, x2, y2, pad_mode, pad_color_t):
+def _extract_window_into(dest, frame, x1, y1, x2, y2, pad_mode, pad_color_t):
     """
-    Extract window [y1:y2, x1:x2] from a single frame [H, W, C].
-    The window may extend outside the frame; out-of-bounds regions are filled
-    using pad_mode ('color' -> pad_color_t, 'edge' -> replicate edge pixels).
-    Returns [win_h, win_w, C].
+    Fill dest [win_h, win_w, C] with window [y1:y2, x1:x2] of frame [H, W, C],
+    writing in place to avoid a per-frame canvas allocation. The window may
+    extend outside the frame; out-of-bounds regions are filled using pad_mode
+    ('color' -> pad_color_t, 'edge' -> replicate edge pixels).
     """
     H, W, C = frame.shape
-    win_w = x2 - x1
-    win_h = y2 - y1
 
     # Valid intersection inside the frame.
     vx1 = max(0, x1)
@@ -44,32 +42,34 @@ def _extract_window(frame, x1, y1, x2, y2, pad_mode, pad_color_t):
 
     # If the intersection is degenerate (entirely out of bounds), fallback to color padding
     if vx2 <= vx1 or vy2 <= vy1:
-        return pad_color_t.view(1, 1, C).expand(win_h, win_w, C).clone()
+        dest[:] = pad_color_t.view(1, 1, C)
+        return
 
     if pad_mode == "edge":
         # Extract the valid sub-region first (much smaller memory footprint than padding the whole frame).
         sub_frame = frame[vy1:vy2, vx1:vx2, :]  # Shape [sub_h, sub_w, C]
-        
+
         # Calculate padding needed relative to the sub-region.
         pad_left = vx1 - x1
         pad_right = x2 - vx2
         pad_top = vy1 - y1
         pad_bottom = y2 - vy2
-        
+
         if pad_left or pad_right or pad_top or pad_bottom:
             t = sub_frame.permute(2, 0, 1).unsqueeze(0)  # [1, C, sub_h, sub_w]
             t = F.pad(t, (pad_left, pad_right, pad_top, pad_bottom), mode="replicate")
-            return t.squeeze(0).permute(1, 2, 0)  # [win_h, win_w, C]
-        return sub_frame
+            dest[:] = t.squeeze(0).permute(1, 2, 0)  # [win_h, win_w, C]
+        else:
+            dest[:] = sub_frame
+        return
 
     # Color fill (default)
-    canvas = pad_color_t.view(1, 1, C).expand(win_h, win_w, C).clone()
+    dest[:] = pad_color_t.view(1, 1, C)
     dy1 = vy1 - y1
     dx1 = vx1 - x1
-    canvas[dy1 : dy1 + (vy2 - vy1), dx1 : dx1 + (vx2 - vx1), :] = frame[
+    dest[dy1 : dy1 + (vy2 - vy1), dx1 : dx1 + (vx2 - vx1), :] = frame[
         vy1:vy2, vx1:vx2, :
     ]
-    return canvas
 
 
 class GetVideoCropFrames(io.ComfyNode):
@@ -147,7 +147,7 @@ class GetVideoCropFrames(io.ComfyNode):
             outputs=[
                 io.Custom("BBOX_RESTORE_INFO").Output(
                     display_name="restore_info",
-                    tooltip="Per-frame crop metadata required by Restore BBox Crop Frames.",
+                    tooltip="Per-frame crop metadata required by Restore Video Crop Frames.",
                 ),
                 io.Image.Output(
                     display_name="cropped_frames",
@@ -296,9 +296,7 @@ class GetVideoCropFrames(io.ComfyNode):
         for i in range(B):
             bbox = norm[i]
             if bbox is None:
-                info_frames.append(
-                    {"crop_box": None, "bbox": None, "original_size": (H, W)}
-                )
+                info_frames.append({"crop_box": None, "bbox": None})
                 continue
 
             x1, y1, x2, y2 = bbox
@@ -317,17 +315,17 @@ class GetVideoCropFrames(io.ComfyNode):
             wx2 = wx1 + target_w
             wy2 = wy1 + target_h
 
-            cropped_frames[i] = _extract_window(
-                frames[i], wx1, wy1, wx2, wy2, pad_mode, pad_color_t
+            _extract_window_into(
+                cropped_frames[i], frames[i], wx1, wy1, wx2, wy2, pad_mode, pad_color_t
             )
 
-            # Process mask cropping
+            # Process mask cropping (in-place into the preallocated batch)
             if masks is not None:
-                mask_3d = masks[i].unsqueeze(-1)
-                cropped_mask_3d = _extract_window(
-                    mask_3d, wx1, wy1, wx2, wy2, pad_mode, mask_pad_color
+                _extract_window_into(
+                    cropped_masks[i].unsqueeze(-1),
+                    masks[i].unsqueeze(-1),
+                    wx1, wy1, wx2, wy2, pad_mode, mask_pad_color,
                 )
-                cropped_masks[i] = cropped_mask_3d.squeeze(-1)
             else:
                 # Reconstruct mask from the bbox (the actual bbox area themselves)
                 # Fill box region inside the crop window with 1.0, and 0.0 outside.
@@ -342,11 +340,12 @@ class GetVideoCropFrames(io.ComfyNode):
                 {
                     "crop_box": (wx1, wy1, wx2, wy2),
                     "bbox": (x1, y1, x2, y2),
-                    "original_size": (H, W),
                 }
             )
 
         restore_info = {
+            "version": 2,
+            "original_size": (H, W),
             "frames": info_frames,
             "target_w": target_w,
             "target_h": target_h,

@@ -49,5 +49,5 @@
 
 ### Video
 
-* **Get BBox Crop Frames**: Crops a frame batch to a uniform size driven by per-frame bboxes (grown to the largest, optionally squared), recording each frame's bbox for restoration
-* **Restore BBox Crop Frames**: Pastes processed crops back onto the background frames using the recorded bboxes, with optional feathered blending
+* **Get Video Crop Frames**: Crops a frame batch to a uniform size driven by per-frame bboxes or masks (grown to the largest, optionally squared), recording crop metadata for restoration
+* **Restore Video Crop Frames**: Pastes processed crops back onto the background frames using the recorded crop metadata, blending with per-frame masks (crop-space or background-space, auto-detected) or a feathered bbox edge (inner/outer/mid), in VRAM-bounded GPU chunks

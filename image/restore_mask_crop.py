@@ -75,10 +75,6 @@ class RestoreMaskCrop(io.ComfyNode):
                     tensor, width, height, method, is_mask
                 )
 
-            # Map method names to torch modes
-            # "nearest-exact" -> "nearest"
-            mode = method if method != "nearest-exact" else "nearest"
-
             # Images: [B, H, W, C] -> [B, C, H, W]
             # Masks:  [B, H, W]    -> [B, 1, H, W]
             if is_mask:
@@ -90,14 +86,14 @@ class RestoreMaskCrop(io.ComfyNode):
                 t = tensor.permute(0, 3, 1, 2)
 
             # Perform Interpolation
-            if mode in ["bilinear", "bicubic"]:
+            if method in ["bilinear", "bicubic"]:
                 t = torch.nn.functional.interpolate(
-                    t, size=(height, width), mode=mode, align_corners=False
+                    t, size=(height, width), mode=method, align_corners=False
                 )
             else:
-                # area / nearest
+                # 'nearest-exact' and 'area' are passed through natively.
                 t = torch.nn.functional.interpolate(
-                    t, size=(height, width), mode=mode
+                    t, size=(height, width), mode=method
                 )
 
             # Restore Dimensions
