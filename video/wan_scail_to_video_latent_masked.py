@@ -34,7 +34,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="WanSCAILToVideoLatentMasked",
-            display_name="🐧 Wan SCAIL To Video (Latent Masked)",
+            display_name="🐧 WanSCAILToVideo (Latent Masked)",
             category="SuperNodes/Video",
             description="WanSCAILToVideo with optional original_frames/original_frame_masks inputs. "
                         "White mask areas are hard-preserved from the original video in the latent "
