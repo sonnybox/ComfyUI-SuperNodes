@@ -1,9 +1,25 @@
 """WanSCAILToVideoLatentMasked: variant of ComfyUI's WanSCAILToVideo that accepts
 optional original_frames + original_frame_masks. Masked areas of the original video
 are encoded into the latent and locked via the noise mask, so the sampler is forced
-to preserve them instead of being trusted to recreate them."""
+to preserve them instead of being trusted to recreate them.
+
+Seam handling:
+- blockify_mask snaps the keep-mask outward to the 2x2-latent-cell token grid (16x16 px),
+  so no transformer token straddles the preserve boundary.
+- preserve_grow dilates the keep-mask N latent cells into generated territory (a fully
+  locked concession band).
+- preserve_feather adds a linear 1->0 falloff over N further cells. Fractional noise-mask
+  values are blended per-step by the sampler; chain a DifferentialDiffusion node on the
+  model to turn the gradient into a progressive unlock instead of a crossfade.
+- The model's 4 clean-context flag channels (SCAIL-2 history mask) are fed a crisp binary
+  mask via the concat_mask conditioning key, so feathering never leaks fractional flags
+  into the model input.
+- preserve_mask outputs the effective pixel-space keep mask (post blockify/grow/feather)
+  for exact downstream re-compositing of the original video.
+"""
 
 import torch
+import torch.nn.functional as F
 
 import nodes
 import node_helpers
@@ -22,7 +38,8 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
             category="SuperNodes/Video",
             description="WanSCAILToVideo with optional original_frames/original_frame_masks inputs. "
                         "White mask areas are hard-preserved from the original video in the latent "
-                        "instead of trusting the model to recreate them.",
+                        "instead of trusting the model to recreate them. Includes token-grid mask "
+                        "blockify plus grow/feather controls for seamless blending.",
             inputs=[
                 io.Conditioning.Input("positive"),
                 io.Conditioning.Input("negative"),
@@ -45,12 +62,16 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                 io.Image.Input("previous_frames", optional=True, tooltip="SCAIL-2 only. Full decoded output of the previous chunk. Only the last previous_frame_count are used as the extension anchor."),
                 io.Image.Input("original_frames", optional=True, tooltip="Original video frames at the output resolution. Areas covered by original_frame_masks are encoded into the latent and locked so the sampler preserves them exactly. Offset by video_frame_offset like pose_video. Ignored if original_frame_masks is not connected."),
                 io.Mask.Input("original_frame_masks", optional=True, tooltip="Per-frame masks matching original_frames (a single mask is broadcast to all frames). White (1.0) = hard-preserve the original video content, black (0.0) = generate normally. Ignored if original_frames is not connected."),
+                io.Boolean.Input("blockify_mask", default=True, optional=True, tooltip="Snap the preserve mask outward to the transformer token grid (2x2 latent cells = 16x16 px), so no token straddles the preserve boundary. Recommended on; moves the boundary outward by at most 15 px."),
+                io.Int.Input("preserve_grow", default=0, min=0, max=16, step=1, optional=True, tooltip="Dilate the preserve mask by this many latent cells (8 px each) into generated territory. Creates a fully locked concession band around the preserved region so blending never touches the area you actually masked."),
+                io.Int.Input("preserve_feather", default=0, min=0, max=16, step=1, optional=True, tooltip="Linear 1->0 falloff over this many latent cells (8 px each) beyond the (grown) preserve mask. Fractional values are blended per sampling step. Strongly recommended to chain a DifferentialDiffusion node on the model when > 0, which turns the gradient into a progressive unlock instead of a crossfade."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
                 io.Conditioning.Output(display_name="negative"),
                 io.Latent.Output(display_name="latent", tooltip="Latent of the generation size. Contains the encoded original frames (with matching noise mask) where original_frame_masks preserves them; empty elsewhere."),
                 io.Int.Output(display_name="video_frame_offset", tooltip="Adjusted offset + length. Wire into the next chunk."),
+                io.Mask.Output(display_name="preserve_mask", tooltip="Effective pixel-space preserve mask (after blockify/grow/feather), one frame per output video frame. Use as the alpha for re-compositing the original video over the decoded output. All zeros when preservation is inactive."),
             ],
             is_experimental=True,
         )
@@ -58,9 +79,12 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, pose_strength, pose_start, pose_end,
                 video_frame_offset, previous_frame_count, replacement_mode=False, reference_image=None, clip_vision_output=None, pose_video=None,
-                pose_video_mask=None, reference_image_mask=None, previous_frames=None, original_frames=None, original_frame_masks=None) -> io.NodeOutput:
+                pose_video_mask=None, reference_image_mask=None, previous_frames=None, original_frames=None, original_frame_masks=None,
+                blockify_mask=True, preserve_grow=0, preserve_feather=0) -> io.NodeOutput:
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         noise_mask = None
+        concat_generate = None
+        preserve_mask_out = torch.zeros((1, height, width))
 
         ref_mask_flag = not replacement_mode
         positive = node_helpers.conditioning_set_values(positive, {"ref_mask_flag": ref_mask_flag})
@@ -171,12 +195,55 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                 # 4-frame temporal stacking (first frame repeated, matching the VAE); a latent frame
                 # is only preserved where all 4 of its pixel frames are masked.
                 m = torch.cat([m[:1].repeat(4, 1, 1, 1), m[1:]], dim=0)
-                m = m.view(-1, 4, 1, m.shape[-2], m.shape[-1]).amin(dim=1)
-                keep = m.movedim(1, 0).unsqueeze(0).clamp(0.0, 1.0)  # (1, 1, T_lat, h, w)
+                keep = m.view(-1, 4, 1, m.shape[-2], m.shape[-1]).amin(dim=1).clamp(0.0, 1.0)  # (T_lat_m, 1, h, w)
+
+                # Snap outward to the 2x2-latent-cell token grid so no transformer token
+                # straddles the preserve boundary (one token = 16x16 px).
+                h_lat, w_lat = keep.shape[-2], keep.shape[-1]
+                if blockify_mask and h_lat % 2 == 0 and w_lat % 2 == 0:
+                    blocks = (keep > 0.5).float().view(-1, 1, h_lat // 2, 2, w_lat // 2, 2).amax(dim=(3, 5))
+                    keep = blocks.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3)
+
+                # Concession band: dilate the fully locked region into generated territory.
+                for _ in range(preserve_grow):
+                    keep = F.max_pool2d(keep, 3, stride=1, padding=1)
+
+                # Binary snapshot before feathering: only fully locked cells count as clean
+                # context for the model's SCAIL-2 history-mask channels.
+                keep_hard = (keep > 1.0 - 1e-3).float()
+
+                # Linear 1->0 falloff beyond the locked region; cell at distance d gets
+                # (feather+1-d)/(feather+1). The sampler blends fractional cells per step
+                # (or unlocks them progressively with DifferentialDiffusion).
+                if preserve_feather > 0:
+                    acc = keep.clone()
+                    cur = keep
+                    for _ in range(preserve_feather):
+                        cur = F.max_pool2d(cur, 3, stride=1, padding=1)
+                        acc += cur
+                    keep = (acc / (preserve_feather + 1)).clamp(0.0, 1.0)
+
+                keep5 = keep.movedim(1, 0).unsqueeze(0)  # (1, 1, T_lat_m, h, w)
+                hard5 = keep_hard.movedim(1, 0).unsqueeze(0)
 
                 noise_mask = torch.ones((1, 1, latent.shape[2], latent.shape[-2], latent.shape[-1]), device=latent.device, dtype=latent.dtype)
-                t_use = min(keep.shape[2], t_lat)
-                noise_mask[:, :, :t_use] = 1.0 - keep[:, :, :t_use].to(device=latent.device, dtype=latent.dtype)
+                t_use = min(keep5.shape[2], t_lat)
+                noise_mask[:, :, :t_use] = 1.0 - keep5[:, :, :t_use].to(device=latent.device, dtype=latent.dtype)
+
+                # Crisp binary flags for the model's 4 clean-context channels (overrides the
+                # denoise_mask fallback in WAN21_SCAIL2.concat_cond), so feathering never
+                # feeds fractional history flags into the model.
+                concat_generate = torch.ones_like(noise_mask)
+                concat_generate[:, :, :t_use] = 1.0 - hard5[:, :, :t_use].to(device=latent.device, dtype=latent.dtype)
+
+                # Pixel-space effective keep mask for downstream re-compositing: latent frame 0
+                # maps to pixel frame 0, every later latent frame to 4 pixel frames.
+                pm = keep5[0, 0].cpu()
+                pm_pix = torch.cat([pm[:1], pm[1:].repeat_interleave(4, dim=0)], dim=0)
+                pm_pix = F.interpolate(pm_pix.unsqueeze(1), size=(height, width), mode="bilinear", align_corners=False).squeeze(1)
+                if pm_pix.shape[0] < length:
+                    pm_pix = torch.cat([pm_pix, torch.zeros((length - pm_pix.shape[0], height, width))], dim=0)
+                preserve_mask_out = pm_pix[:length].clamp(0.0, 1.0)
 
         if prev_trimmed is not None:
             pf = comfy.utils.common_upscale(prev_trimmed.movedim(-1, 1), width, height, "bicubic", "center").movedim(1, -1)
@@ -187,11 +254,17 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
             if noise_mask is None:
                 noise_mask = torch.ones((1, 1, latent.shape[2], latent.shape[-2], latent.shape[-1]), device=latent.device, dtype=latent.dtype)
             noise_mask[:, :, :prev_latent_frames] = 0.0
+            if concat_generate is not None:
+                concat_generate[:, :, :prev_latent_frames] = 0.0
+
+        if concat_generate is not None:
+            positive = node_helpers.conditioning_set_values(positive, {"concat_mask": concat_generate})
+            negative = node_helpers.conditioning_set_values(negative, {"concat_mask": concat_generate})
 
         out_latent = {"samples": latent}
         if noise_mask is not None:
             out_latent["noise_mask"] = noise_mask
-        return io.NodeOutput(positive, negative, out_latent, video_frame_offset + length)
+        return io.NodeOutput(positive, negative, out_latent, video_frame_offset + length, preserve_mask_out)
 
 
 NODE = [WanSCAILToVideoLatentMasked]
