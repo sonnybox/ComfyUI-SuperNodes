@@ -63,7 +63,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                 io.Image.Input("original_frames", optional=True, tooltip="Original video frames at the output resolution. Areas covered by original_frame_masks are encoded into the latent and locked so the sampler preserves them exactly. Offset by video_frame_offset like pose_video. Ignored if original_frame_masks is not connected."),
                 io.Mask.Input("original_frame_masks", optional=True, tooltip="Per-frame masks matching original_frames (a single mask is broadcast to all frames). White (1.0) = hard-preserve the original video content, black (0.0) = generate normally. Ignored if original_frames is not connected."),
                 io.Boolean.Input("blockify_mask", default=True, optional=True, tooltip="Snap the preserve mask outward to the transformer token grid (2x2 latent cells = 16x16 px), so no token straddles the preserve boundary. Recommended on; moves the boundary outward by at most 15 px."),
-                io.Int.Input("preserve_grow", default=0, min=0, max=16, step=1, optional=True, tooltip="Dilate the preserve mask by this many latent cells (8 px each) into generated territory. Creates a fully locked concession band around the preserved region so blending never touches the area you actually masked."),
+                io.Int.Input("preserve_grow", default=0, min=-16, max=16, step=1, optional=True, tooltip="Adjust the preserve mask by this many latent cells (8 px each). Positive = dilate into generated territory (blending never touches the area you masked). Negative = erode into preserved territory (the model recreates the boundary strip, sacrificing some original content for a seamless transition). Applied after blockify."),
                 io.Int.Input("preserve_feather", default=0, min=0, max=16, step=1, optional=True, tooltip="Linear 1->0 falloff over this many latent cells (8 px each) beyond the (grown) preserve mask. Fractional values are blended per sampling step. Strongly recommended to chain a DifferentialDiffusion node on the model when > 0, which turns the gradient into a progressive unlock instead of a crossfade."),
             ],
             outputs=[
@@ -204,9 +204,14 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                     blocks = (keep > 0.5).float().view(-1, 1, h_lat // 2, 2, w_lat // 2, 2).amax(dim=(3, 5))
                     keep = blocks.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3)
 
-                # Concession band: dilate the fully locked region into generated territory.
-                for _ in range(preserve_grow):
-                    keep = F.max_pool2d(keep, 3, stride=1, padding=1)
+                # Boundary adjustment: positive grows the locked region into generated
+                # territory, negative erodes it inward (model recreates the boundary strip).
+                # max_pool2d pads with -inf, so neither direction bleeds in from frame edges.
+                for _ in range(abs(preserve_grow)):
+                    if preserve_grow > 0:
+                        keep = F.max_pool2d(keep, 3, stride=1, padding=1)
+                    else:
+                        keep = 1.0 - F.max_pool2d(1.0 - keep, 3, stride=1, padding=1)
 
                 # Binary snapshot before feathering: only fully locked cells count as clean
                 # context for the model's SCAIL-2 history-mask channels.
