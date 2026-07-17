@@ -54,6 +54,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                 io.Int.Input("video_frame_offset", default=0, min=0, max=nodes.MAX_RESOLUTION, step=1, tooltip="Cumulative output frame this chunk begins at. Wire from the previous chunk's video_frame_offset output."),
                 io.Int.Input("previous_frame_count", default=5, min=1, max=nodes.MAX_RESOLUTION, step=4, tooltip="Tail frames of previous_frames to anchor. SCAIL-2 trained at 5 (81-frame chunks, 76-frame step)."),
                 io.Image.Input("previous_frames", optional=True, tooltip="SCAIL-2 only. Full decoded output of the previous chunk. Only the last previous_frame_count are used as the extension anchor."),
+                io.Boolean.Input("enable_latent_mask", default=True, optional=True, tooltip="Toggle the original-frame preservation feature. Off = original_frames/original_frame_masks are ignored entirely and the node behaves exactly like stock WanSCAILToVideo."),
                 io.Image.Input("original_frames", optional=True, tooltip="Original video frames at the output resolution. Areas covered by original_frame_masks are encoded into the latent and locked so the sampler preserves them exactly. Offset by video_frame_offset like pose_video. Ignored if original_frame_masks is not connected."),
                 io.Mask.Input("original_frame_masks", optional=True, tooltip="Per-frame masks matching original_frames (a single mask is broadcast to all frames). White (1.0) = hard-preserve the original video content, black (0.0) = generate normally. Snapped outward to the 16 px token grid. Ignored if original_frames is not connected."),
                 io.Int.Input("frame_mask_grow", default=0, min=-16, max=16, step=1, optional=True, tooltip="Shift the preserve boundary by this many latent cells (8 px each) after token-grid snapping. Positive = dilate into generated territory (blending never touches the area you masked). Negative = erode into preserved territory (the model recreates the boundary strip, sacrificing some original content for a more seamless transition)."),
@@ -70,7 +71,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, pose_strength, pose_start, pose_end,
                 video_frame_offset, previous_frame_count, replacement_mode=False, reference_image=None, clip_vision_output=None, pose_video=None,
-                pose_video_mask=None, reference_image_mask=None, previous_frames=None, original_frames=None, original_frame_masks=None,
+                pose_video_mask=None, reference_image_mask=None, previous_frames=None, enable_latent_mask=True, original_frames=None, original_frame_masks=None,
                 frame_mask_grow=0) -> io.NodeOutput:
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         noise_mask = None
@@ -152,7 +153,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
 
         # Hard-preserve original video areas: encode original_frames into the latent and
         # zero the noise mask where original_frame_masks marks them. Requires both inputs.
-        if original_frames is not None and original_frame_masks is not None and original_frames.shape[0] > 0:
+        if enable_latent_mask and original_frames is not None and original_frame_masks is not None and original_frames.shape[0] > 0:
             orig_frames = original_frames
             orig_masks = original_frame_masks
             if orig_masks.ndim == 2:
