@@ -3,11 +3,16 @@ import random
 
 from comfy_api.latest import io, ui
 import folder_paths
+
+import matplotlib
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 from PIL import Image
 import torch
+
 
 
 class SigmasGraph(io.ComfyNode):
