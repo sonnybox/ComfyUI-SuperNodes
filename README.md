@@ -4,7 +4,7 @@
 
 ### Color
 
-* **Adjust Color AIO**: Adjust everything at once
+* **Adjust Color AIO**: Adjust all color options at once
 * **Adjust Brightness Contrast Gamma**: Adjust brightness, contrast, and gamma in one node
 * **Adjust Hue Saturation**: Shift hue and adjust saturation
 * **Adjust White Balance**: Correct white balance via temperature and tint
@@ -50,4 +50,5 @@
 ### Video
 
 * **Get Video Crop Frames**: Crops a frame batch to a uniform size driven by per-frame bboxes or masks (grown to the largest, optionally squared), recording crop metadata for restoration
-* **Restore Video Crop Frames**: Pastes processed crops back onto the background frames using the recorded crop metadata, blending with per-frame masks (crop-space or background-space, auto-detected) or a feathered bbox edge (inner/outer/mid), in VRAM-bounded GPU chunks
+* **Restore Video Crop Frames**: Pastes processed crops back onto the background frames using the recorded crop metadata, blending with per-frame masks (crop-space or background-space, auto-detected) or a feathered bbox edge (inner/outer/mid)
+* **SAM3 Video Track (Masked Index)**: A modified version of the native video track node that accepts a mask based on a frame index
