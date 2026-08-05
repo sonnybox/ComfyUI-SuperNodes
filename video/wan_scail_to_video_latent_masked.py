@@ -2,19 +2,6 @@
 optional original_frames + original_frame_masks. Masked areas of the original video
 are encoded into the latent and locked via the noise mask, so the sampler is forced
 to preserve them instead of being trusted to recreate them.
-
-Mask quantization:
-- A noise mask can only ever be enforced per transformer token. Wan's VAE is 8x and
-  the transformer patches 2x2 on top, so one token is 16x16 px. The keep-mask is
-  binarized and pooled onto that grid, which keeps every token fully binary and stops
-  any of them straddling the preserve boundary (the SCAIL-2 clean-context flag
-  channels stay crisp).
-- Temporally the same rule applies. A Wan latent frame covers 1 pixel frame for the
-  first and 4 for every one after, so per-pixel-frame masks are grouped onto that.
-- mask_block_direction picks which way the boundary rounds spatially, and
-  mask_temporal_alignment does the same across time.
-- Masks must already match original_frames in size and count; the node applies the
-  same geometry to both, so nothing can drift out of alignment.
 """
 
 import torch
@@ -32,91 +19,36 @@ VAE_STRIDE = 8
 TOKEN_CELLS = 2
 TOKEN_PX = VAE_STRIDE * TOKEN_CELLS
 
-BLOCK_DIRECTIONS = ["outer", "center", "inner", "alternate"]
-TEMPORAL_ALIGNMENTS = ["inner", "center", "outer"]
-
-# 4x4 Bayer matrix, normalised to thresholds in (0, 1). Used by "alternate" to
-# dither partially-covered tokens instead of thresholding them all the same way:
-# a token 25% covered lands on roughly a quarter of the time, spread out in a
-# fixed pattern. Fully covered is always kept, empty never is, so it only ever
-# reassigns the band that sits between "inner" and "outer".
-_BAYER4 = torch.tensor(
-    [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]],
-    dtype=torch.float32,
-)
-
 
 def _wan_frame_spans(t_latent):
     """Pixel frames covered by each Wan latent frame: 1, then 4 each."""
     return [1] + [4] * (t_latent - 1)
 
 
-def _pool_spatial(b, block, direction):
-    if direction == "outer":
-        return F.max_pool2d(b, block)  # any pixel marked
-    if direction == "inner":
-        return -F.max_pool2d(-b, block)  # every pixel marked
-    return F.avg_pool2d(b, block)  # fraction covered (center, alternate)
-
-
-def _dither(fraction):
-    """Ordered-dither a coverage fraction onto a binary token grid."""
-    h, w = fraction.shape[-2], fraction.shape[-1]
-    thresh = (_BAYER4.to(fraction.device) + 0.5) / 16.0
-    reps = (-(-h // 4), -(-w // 4))
-    tile = thresh.repeat(reps[0], reps[1])[:h, :w]
-    return (fraction > tile).to(fraction.dtype)
-
-
-def _group_temporal(soft, spans, direction):
-    out, at = [], 0
-    for span in spans:
-        g = soft[at:at + span]
-        at += span
-        if direction == "outer":
-            out.append(g.amax(dim=0, keepdim=True))
-        elif direction == "inner":
-            out.append(g.amin(dim=0, keepdim=True))
-        else:
-            out.append(g.mean(dim=0, keepdim=True))
-    return torch.cat(out, dim=0)
-
-
-def _drop_stray_blocks(blocks):
-    """Zero blocks with no neighbour in their 8-cell neighbourhood, per frame.
-
-    A frame whose mask is a single lone block keeps it -- that is not a stray,
-    it is the whole mask.
-    """
-    kernel = torch.ones(1, 1, 3, 3, device=blocks.device, dtype=blocks.dtype)
-    kernel[0, 0, 1, 1] = 0.0
-    neighbours = F.conv2d(blocks, kernel, padding=1)
-    solo = (blocks.flatten(1).sum(1) <= 1).view(-1, 1, 1, 1).to(blocks.dtype)
-    keep = (neighbours > 0).to(blocks.dtype)
-    return blocks * torch.clamp(keep + solo, max=1.0)
-
-
-def _quantize_keep_mask(m, direction, alignment, stray):
+def _quantize_keep_mask(m):
     """Per-pixel-frame masks at output resolution -> token blocks + keep + preview.
 
     m: [N, height, width], already sized to the output. Returns blocks
     [T_lat, 1, h/2, w/2], keep [T_lat, 1, h, w] on the latent cell grid, and a
     [N, height, width] preview of what actually got locked.
+
+    Inner on both axes: min-pool over each 16 px token, then over each latent
+    frame's pixel frames, so a cell survives only where every pixel and every
+    frame under it is marked. Both are min operations, which compose, so the
+    result is the same as one min over the whole 3D cell.
     """
     t_lat = ((m.shape[0] - 1) // 4) + 1
     spans = _wan_frame_spans(t_lat)
     if sum(spans) > m.shape[0]:  # trailing partial group: pad with the last frame
         m = torch.cat([m, m[-1:].expand(sum(spans) - m.shape[0], -1, -1)], 0)
 
-    # Pool spatially, then group temporally, keeping the value soft throughout so
-    # the binary decision happens exactly once at the end -- on true 3D coverage
-    # rather than thresholding twice.
     b = (m > 0.5).float().unsqueeze(1)
-    soft = _group_temporal(_pool_spatial(b, TOKEN_PX, direction), spans, alignment)
-    blocks = _dither(soft) if direction == "alternate" else (soft >= 0.5).float()
-
-    if stray and blocks.any():
-        blocks = _drop_stray_blocks(blocks)
+    spatial = -F.max_pool2d(-b, TOKEN_PX)  # min-pool: every pixel marked
+    groups, at = [], 0
+    for span in spans:
+        groups.append(spatial[at:at + span].amin(dim=0, keepdim=True))
+        at += span
+    blocks = torch.cat(groups, dim=0)
 
     keep = blocks.repeat_interleave(TOKEN_CELLS, dim=-2).repeat_interleave(
         TOKEN_CELLS, dim=-1
@@ -139,10 +71,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
             node_id="WanSCAILToVideoLatentMasked",
             display_name="🐧 WanSCAILToVideo (Latent Masked)",
             category="SuperNodes/Video",
-            description="WanSCAILToVideo with optional original_frames/original_frame_masks inputs. "
-                        "White mask areas are hard-preserved from the original video in the latent "
-                        "instead of trusting the model to recreate them. The mask is quantized onto "
-                        "the 16 px transformer token grid, spatially and temporally.",
+            description="WanSCAILToVideo with optional original_frames/original_frame_masks inputs.",
             inputs=[
                 io.Conditioning.Input("positive"),
                 io.Conditioning.Input("negative"),
@@ -166,9 +95,6 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                 io.Boolean.Input("enable_latent_mask", default=True, optional=True, tooltip="Toggle the original-frame preservation feature. Off = original_frames/original_frame_masks are ignored entirely and the node behaves exactly like stock WanSCAILToVideo."),
                 io.Image.Input("original_frames", optional=True, tooltip="Original video frames at the output resolution. Areas covered by original_frame_masks are encoded into the latent and locked so the sampler preserves them exactly. Offset by video_frame_offset like pose_video. Ignored if original_frame_masks is not connected."),
                 io.Mask.Input("original_frame_masks", optional=True, tooltip="Per-frame masks matching original_frames (a single mask is broadcast to all frames). White (1.0) = hard-preserve the original video content, black (0.0) = generate normally. Quantized onto the 16 px token grid. Ignored if original_frames is not connected."),
-                io.Combo.Input("mask_block_direction", options=BLOCK_DIRECTIONS, default="outer", optional=True, tooltip="Which way the preserve boundary rounds onto the 16 px token grid. 16 px is the finest the model can reason at (the transformer patches 2x2 over the 8x VAE), so a token is preserved whole or not at all. outer: preserved if ANY of its pixels are, so 100% of what you marked is kept and the edge grows into generated territory. inner: preserved only if ALL of its pixels are, so it stays strictly inside your mask. center: whichever side holds the majority, the closest fit to the true boundary. alternate: ordered-dithers the partially-covered tokens between kept and generated, approximating a feathered edge on a grid that can only be binary -- fully covered tokens are always kept and empty ones never are, so it only reassigns the band between inner and outer."),
-                io.Combo.Input("mask_temporal_alignment", options=TEMPORAL_ALIGNMENTS, default="inner", optional=True, tooltip="The same choice across time. One Wan latent frame covers 4 pixel frames (1 for the first), and the temporal patch is 1, so that is the finest temporal unit there is. inner: preserved only where ALL pixel frames in the group are masked (conservative, and what this node did before this option existed). outer: preserved if ANY of them are, so one masked frame holds its whole group. center: majority of the group."),
-                io.Boolean.Input("remove_stray_blocks", default=False, optional=True, tooltip="Drop preserved tokens that have no neighbour in their 8-cell neighbourhood, per latent frame. Cleans up speckle from a noisy mask. A frame whose mask is a single lone token keeps it."),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive"),
@@ -183,8 +109,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, pose_strength, pose_start, pose_end,
                 video_frame_offset, previous_frame_count, replacement_mode=False, reference_image=None, clip_vision_output=None, pose_video=None,
-                pose_video_mask=None, reference_image_mask=None, previous_frames=None, enable_latent_mask=True, original_frames=None, original_frame_masks=None,
-                mask_block_direction="outer", mask_temporal_alignment="inner", remove_stray_blocks=False) -> io.NodeOutput:
+                pose_video_mask=None, reference_image_mask=None, previous_frames=None, enable_latent_mask=True, original_frames=None, original_frame_masks=None) -> io.NodeOutput:
         latent = torch.zeros([batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8], device=comfy.model_management.intermediate_device())
         noise_mask = None
         quantized_mask = None
@@ -312,10 +237,7 @@ class WanSCAILToVideoLatentMasked(io.ComfyNode):
                 om = comfy.utils.common_upscale(
                     orig_masks.unsqueeze(1).float(), width, height, "bilinear", "center"
                 ).squeeze(1)
-                _, keep, quantized_mask = _quantize_keep_mask(
-                    om.to(latent.device), mask_block_direction,
-                    mask_temporal_alignment, remove_stray_blocks,
-                )
+                _, keep, quantized_mask = _quantize_keep_mask(om.to(latent.device))
 
                 keep5 = keep.movedim(1, 0).unsqueeze(0)  # (1, 1, T_lat_m, h, w)
 
