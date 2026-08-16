@@ -1,4 +1,5 @@
 import ctypes
+import gc
 
 import comfy.model_management
 from comfy_api.latest import io
@@ -8,7 +9,7 @@ try:
 except ImportError:
     aimdo_control = None
 
-# Boot-time reserves, so 0.0 can put things back the way ComfyUI started.
+# Save starting reserves, so 0.0 can put things back the way ComfyUI started.
 _DEFAULTS = {}
 
 
@@ -73,35 +74,33 @@ def _set_dynamic_headroom(reserved_bytes):
     return True
 
 
-def _reclaim_vram(reserved_bytes):
-    """Evict resident VRAM until free VRAM meets the new reserve.
+def _evict_vram():
+    """Evict every byte of resident VRAM.
 
     A raised reserve only governs future allocations, so weights already
     resident have to be pushed out for it to take effect immediately. This
     goes through partially_unload, which for DynamicVRAM models drops vbar
     pages while leaving the RAM pins and disk backing alone, so the model
-    streams back on demand rather than reloading from scratch. Models are
-    never detached and partially_unload_ram is never called.
+    streams back on demand rather than reloading from disk. Deliberately not
+    unload_all_models(), which detaches models and takes the RAM pins with
+    them; partially_unload_ram() is never called for the same reason.
     """
     mm = comfy.model_management
+    devices = set(mm.get_all_torch_devices())
     freed_total = 0
 
-    for device in mm.get_all_torch_devices():
-        shortfall = reserved_bytes - mm.get_free_memory(device)
-        for loaded in list(mm.current_loaded_models):
-            if shortfall <= 0:
-                break
-            if loaded.device != device or loaded.is_dead():
-                continue
-            model = loaded.model
-            if model is None:
-                continue
-            freed = model.partially_unload(model.offload_device, shortfall)
-            freed_total += freed
-            shortfall -= freed
+    for loaded in list(mm.current_loaded_models):
+        if loaded.device not in devices or loaded.is_dead():
+            continue
+        model = loaded.model
+        if model is None:
+            continue
+        freed_total += model.partially_unload(model.offload_device, 1e30)
 
-    if freed_total > 0:
-        mm.soft_empty_cache()
+    # Evicted weights can leave unreachable tensors holding caching-allocator
+    # blocks, which empty_cache can only hand back once they are collected.
+    gc.collect()
+    mm.soft_empty_cache()  # synchronizes, empties the torch cache, ipc_collect
     return freed_total
 
 
@@ -112,9 +111,10 @@ class SetReserveVRAM(io.ComfyNode):
             node_id="SetReserveVRAM",
             display_name="🐧 Set Reserve VRAM",
             category="SuperNodes/Tools",
-            description="Sets --reserve-vram dynamically anywhere in a workflow.",
+            description="Sets --reserve-vram dynamically anywhere in a workflow. Use watchers to trigger re-runs when models are loaded.",
+            is_output_node=True,
             inputs=[
-                io.Custom("*").Input("any"),
+                io.Custom("*").Input("any", optional=True),
                 io.Float.Input(
                     "reserved_gb",
                     default=0.0,
@@ -126,7 +126,18 @@ class SetReserveVRAM(io.ComfyNode):
                 io.Boolean.Input(
                     "clean_memory",
                     default=False,
-                    tooltip="Immediately free resident VRAM until the new reserve is met.",
+                    tooltip="Frees resident VRAM.",
+                ),
+                io.Autogrow.Input(
+                    "watchers",
+                    optional=True,
+                    template=io.Autogrow.TemplateNames(
+                        input=io.Custom("*").Input(
+                            "watch",
+                        ),
+                        names=[f"watch_{i}" for i in range(1, 17)],
+                        min=0,
+                    ),
                 ),
             ],
             outputs=[
@@ -135,15 +146,27 @@ class SetReserveVRAM(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, any, reserved_gb, clean_memory=False) -> io.NodeOutput:
+    def fingerprint_inputs(cls, clean_memory=False, **kwargs):
+        # Freeing VRAM is a side effect a cache hit would silently skip, so opt
+        # out of caching when it's on. Left cacheable otherwise, or a passthrough
+        # would re-run everything downstream on every queue.
+        return float("nan") if clean_memory else None
+
+    @classmethod
+    def execute(cls, any=None, reserved_gb=0.0, clean_memory=False,
+                watchers: io.Autogrow.Type = None) -> io.NodeOutput:
+        # watchers are never read. They exist only to pull whatever they are
+        # wired to into this node's cache signature, so a change upstream of
+        # the sampler re-runs this node rather than skipping it as a cache hit
+        # and leaving the previous run's reserve in force.
         _snapshot_defaults()
         core_bytes, aimdo_bytes = _resolve(reserved_gb)
 
         comfy.model_management.EXTRA_RESERVED_VRAM = core_bytes
-        is_dynamic = _set_dynamic_headroom(aimdo_bytes)
+        _set_dynamic_headroom(aimdo_bytes)
 
         if clean_memory:
-            _reclaim_vram(aimdo_bytes if is_dynamic else core_bytes)
+            _evict_vram()
         return io.NodeOutput(any)
 
 

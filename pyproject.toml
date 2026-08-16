@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-supernodes"
-description = "A miscellaneous node pack of custom implementations needed for workflows released by my SuperComfy YouTube channel."
-version = "0.3.3"
+description = "A node pack by SuperCC."
+version = "0.3.4"
 license = { file = "LICENSE" } 
 dependencies  = ["matplotlib"]
 

@@ -8,7 +8,7 @@ class DualSamplerEulerAncestral(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="DualSamplerEulerAncestral",
-            display_name="🐧 Dual Sampler Euler Ancestral",
+            display_name="🐧 DualSamplerEulerAncestral",
             category="SuperNodes/Sampling",
             description="Ancestral Euler with separate noise settings for the video and audio streams.",
             inputs=[

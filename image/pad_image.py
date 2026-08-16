@@ -1,8 +1,9 @@
 import re
 
-import comfy.utils
 from comfy_api.latest import io
 import torch
+
+from .utils import SCALE_METHODS, scale_image
 
 
 class SuperPadImage(io.ComfyNode):
@@ -14,19 +15,11 @@ class SuperPadImage(io.ComfyNode):
 
     Behavior:
     - Image is first scaled to "contain" inside target (aspect preserved).
-    - Then scaled again by scale_factor (0.1–1.0).
+    - Then scaled again by scale_factor (0.1-1.0).
         * 1.0 = normal fill/letterbox
         * <1.0 = shrink image to introduce padding on both axes
     - Image is placed using horizontal/vertical shift.
     """
-
-    upscale_methods = [
-        "nearest-exact",
-        "bilinear",
-        "area",
-        "bicubic",
-        "lanczos",
-    ]
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -78,7 +71,7 @@ class SuperPadImage(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "scale_method",
-                    options=cls.upscale_methods,
+                    options=SCALE_METHODS,
                     default="nearest-exact",
                     tooltip="Resampling method used for resizing.",
                 ),
@@ -126,7 +119,7 @@ class SuperPadImage(io.ComfyNode):
         fw = min(target_width, max(1, int(round(cw * scale_factor))))
         fh = min(target_height, max(1, int(round(ch * scale_factor))))
 
-        resized = cls._resize(image[..., :3], fw, fh, scale_method)
+        resized = scale_image(image[..., :3], fw, fh, scale_method)
 
         canvas = torch.empty(
             (b, target_height, target_width, 3), device=device, dtype=dtype
@@ -152,12 +145,6 @@ class SuperPadImage(io.ComfyNode):
         mask[:, y1:y2, x1:x2] = 0.0
 
         return io.NodeOutput(canvas, mask)
-
-    @classmethod
-    def _resize(cls, img, w, h, method):
-        samples = img.movedim(-1, 1)
-        out = comfy.utils.common_upscale(samples, w, h, method, "disabled")
-        return out.movedim(1, -1)
 
     @classmethod
     def _parse_hex_color(cls, value):

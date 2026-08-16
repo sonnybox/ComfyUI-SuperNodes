@@ -1,7 +1,7 @@
 from comfy_api.latest import io
-import numpy as np
-from PIL import Image
 import torch
+
+from ..image.utils import SCALE_METHODS, scale_image, scale_mask
 
 try:
     from comfy import model_management
@@ -23,59 +23,6 @@ def _compute_device():
         except Exception:
             pass
     return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-
-def _resize_tensor(tensor, width, height, method, is_mask=False):
-    """Resize [B,H,W,C] images or [B,H,W] masks. Lanczos falls back to PIL."""
-    if method == "lanczos":
-        return _pil_resize_fallback(tensor, width, height, method, is_mask)
-
-    if is_mask:
-        t = tensor.unsqueeze(1) if tensor.dim() == 3 else tensor
-    else:
-        t = tensor.permute(0, 3, 1, 2)
-
-    if method in ["bilinear", "bicubic"]:
-        t = torch.nn.functional.interpolate(
-            t, size=(height, width), mode=method, align_corners=False
-        )
-    else:
-        # 'nearest-exact' and 'area' are passed through natively.
-        t = torch.nn.functional.interpolate(t, size=(height, width), mode=method)
-
-    if is_mask:
-        return t.squeeze(1)
-    return t.permute(0, 2, 3, 1)
-
-
-def _pil_resize_fallback(tensor_data, width, height, method, is_mask=False):
-    pil_method = Image.Resampling.LANCZOS
-    if method == "nearest-exact":
-        pil_method = Image.Resampling.NEAREST
-    elif method == "area":
-        pil_method = Image.Resampling.BOX
-    elif method == "bicubic":
-        pil_method = Image.Resampling.BICUBIC
-    elif method == "bilinear":
-        pil_method = Image.Resampling.BILINEAR
-
-    results = []
-    if is_mask:
-        for m in tensor_data:
-            i = Image.fromarray(
-                (m.cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8), mode="L"
-            )
-            i = i.resize((width, height), resample=pil_method)
-            results.append(torch.from_numpy(np.array(i).astype(np.float32) / 255.0))
-    else:
-        for img in tensor_data:
-            i = Image.fromarray(
-                (img.cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
-            )
-            i = i.resize((width, height), resample=pil_method)
-            results.append(torch.from_numpy(np.array(i).astype(np.float32) / 255.0))
-
-    return torch.stack(results).to(tensor_data.device, tensor_data.dtype)
 
 
 def _bbox_feather_alpha(
@@ -125,13 +72,7 @@ class RestoreVideoCropFrames(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "scale_method",
-                    options=[
-                        "nearest-exact",
-                        "bilinear",
-                        "area",
-                        "bicubic",
-                        "lanczos",
-                    ],
+                    options=SCALE_METHODS,
                     tooltip="Interpolation used when resizing crops and crop-space masks.",
                 ),
                 io.Int.Input(
@@ -295,7 +236,7 @@ class RestoreVideoCropFrames(io.ComfyNode):
             if uniform:
                 ch0, cw0 = next(iter(sizes))
                 if crops.shape[1] != ch0 or crops.shape[2] != cw0:
-                    crops = _resize_tensor(crops, cw0, ch0, scale_method)
+                    crops = scale_image(crops, cw0, ch0, scale_method)
 
             crop_masks = None
             if mask_space == "crop":
@@ -304,8 +245,8 @@ class RestoreVideoCropFrames(io.ComfyNode):
                 )
                 if uniform:
                     if crop_masks.shape[1] != ch0 or crop_masks.shape[2] != cw0:
-                        crop_masks = _resize_tensor(
-                            crop_masks, cw0, ch0, scale_method, is_mask=True
+                        crop_masks = scale_mask(
+                            crop_masks, cw0, ch0, scale_method
                         )
                     crop_masks = crop_masks.clamp(0.0, 1.0)
 
@@ -323,7 +264,7 @@ class RestoreVideoCropFrames(io.ComfyNode):
 
                 crop = crops[k]
                 if not uniform and (crop.shape[0] != ch or crop.shape[1] != cw):
-                    crop = _resize_tensor(
+                    crop = scale_image(
                         crop.unsqueeze(0), cw, ch, scale_method
                     )[0]
 
@@ -336,8 +277,8 @@ class RestoreVideoCropFrames(io.ComfyNode):
                 if mask_space == "crop":
                     m = crop_masks[k]
                     if not uniform and (m.shape[0] != ch or m.shape[1] != cw):
-                        m = _resize_tensor(
-                            m.unsqueeze(0), cw, ch, scale_method, is_mask=True
+                        m = scale_mask(
+                            m.unsqueeze(0), cw, ch, scale_method
                         )[0].clamp(0.0, 1.0)
                     alpha = m[sy1:sy2, sx1:sx2]
                 elif mask_space == "background":

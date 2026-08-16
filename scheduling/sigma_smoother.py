@@ -7,9 +7,9 @@ class SigmaSmoother(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="SigmaSmoother",
-            display_name="🐧 Sigma Smoother",
+            display_name="🐧 Sigmas Smoother",
             category="SuperNodes/Scheduling",
-            description="Inserts smoothed interpolation steps at the end of a sigma schedule before the final zero, useful for refining the final denoising steps.",
+            description="Inserts interpolation steps at the end of a sigma schedule before the final zero.",
             inputs=[
                 io.Custom("SIGMAS").Input(
                     "sigmas",

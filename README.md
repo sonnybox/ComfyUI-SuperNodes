@@ -1,4 +1,4 @@
-# ComfyUI SuperNodes
+# ComfyUI SuperNodes by SuperCC
 
 ## Current Nodes
 
@@ -17,7 +17,6 @@
 
 * **Crop Image using Mask**: Crops an image to a mask's bounding box, with optional padding and dimension constraints
 * **Pad Image Scaled**: An alternative method to pad images with adjustable positioning
-* **Resize Image & Mask**: Resize an image and mask together with selectable scaling modes
 * **Restore Mask Crop**: Restores a previously cropped masked region back into its original position
 
 ### Scheduling
@@ -28,6 +27,11 @@
 * **Sigmas Rescale**: Rescales a sigma curve
 * **Sigma Remove**: Remove a sigma at the specified index
 * **Sigma Insert**: Add a sigma at the specified index
+
+### Sampling
+
+* **DualSamplerCustomAdvanced**: Samples a packed audio-video latent with a separate sigma schedule per stream.
+* **DualSamplerEulerAncestral**: Ancestral Euler with separate noise settings for the video and audio streams.
 
 ### Tiling
 

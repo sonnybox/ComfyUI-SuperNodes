@@ -32,7 +32,7 @@ class ImageMaskCrop(io.ComfyNode):
                     min=1,
                     max=512,
                     step=1,
-                    tooltip="Ensure the crop dimensions are a multiple of this value (critical for UNet based processing).",
+                    tooltip="Ensure the crop dimensions are a multiple of this value.",
                 ),
             ],
             outputs=[

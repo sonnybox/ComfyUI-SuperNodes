@@ -59,9 +59,9 @@ def composite(destination, source, x, y, mask=None, multiplier=1, resize_source=
 
 class SuperImageCompositeMasked(io.ComfyNode):
     """
-    Vanilla ImageCompositeMasked with negative x/y offsets allowed, so the
-    source layer can be moved in any direction (like dragging a Photoshop
-    layer). Pixels that fall outside the destination are cropped.
+    A modified version of the ImageCompositeMasked node which allows 
+    negative x/y offsets, so the source layer can be moved in any 
+    direction. Pixels that fall outside the canvas are cropped.
     """
 
     @classmethod
@@ -94,7 +94,7 @@ class SuperImageCompositeMasked(io.ComfyNode):
                     default=False,
                     tooltip="Resize the source to match the destination before compositing.",
                 ),
-                io.Mask.Input("mask", optional=True, tooltip="Optional mask; white areas take the source pixels."),
+                io.Mask.Input("mask", optional=True),
             ],
             outputs=[io.Image.Output(display_name="IMAGE")],
         )

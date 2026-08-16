@@ -59,17 +59,15 @@ class DualSamplerCustomAdvanced(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="DualSamplerCustomAdvanced",
-            display_name="🐧 Dual Sampler Custom Advanced",
+            display_name="🐧 DualSamplerCustomAdvanced",
             category="SuperNodes/Sampling",
-            description="Samples a packed audio-video latent (e.g. MiniMax H3) with a separate sigma schedule per stream. An all-zero schedule leaves that stream untouched so it only conditions the other.",
+            description="Samples a packed audio-video latent (e.g. MiniMax H3) with a separate sigma schedule per stream.",
             inputs=[
                 io.Noise.Input(
                     "noise_video",
-                    tooltip="Noise for the video stream.",
                 ),
                 io.Noise.Input(
                     "noise_audio",
-                    tooltip="Noise for the audio stream.",
                 ),
                 io.Guider.Input("guider"),
                 DualSamplerType.Input("dual_sampler"),
