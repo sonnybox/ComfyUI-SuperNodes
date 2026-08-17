@@ -121,12 +121,11 @@ class SetReserveVRAM(io.ComfyNode):
                     min=-1.0,
                     max=128.0,
                     step=0.1,
-                    tooltip="Set to 0 to restore values at boot. Set a negative number for true zero reserve.",
+                    tooltip="Set to 0 to restore values at start up. Set a negative number for true zero reserve.",
                 ),
                 io.Boolean.Input(
-                    "clean_memory",
+                    "free_vram",
                     default=False,
-                    tooltip="Frees resident VRAM.",
                 ),
                 io.Autogrow.Input(
                     "watchers",
@@ -146,14 +145,14 @@ class SetReserveVRAM(io.ComfyNode):
         )
 
     @classmethod
-    def fingerprint_inputs(cls, clean_memory=False, **kwargs):
+    def fingerprint_inputs(cls, free_vram=False, **kwargs):
         # Freeing VRAM is a side effect a cache hit would silently skip, so opt
         # out of caching when it's on. Left cacheable otherwise, or a passthrough
         # would re-run everything downstream on every queue.
-        return float("nan") if clean_memory else None
+        return float("nan") if free_vram else None
 
     @classmethod
-    def execute(cls, any=None, reserved_gb=0.0, clean_memory=False,
+    def execute(cls, any=None, reserved_gb=0.0, free_vram=False,
                 watchers: io.Autogrow.Type = None) -> io.NodeOutput:
         # watchers are never read. They exist only to pull whatever they are
         # wired to into this node's cache signature, so a change upstream of
@@ -165,7 +164,7 @@ class SetReserveVRAM(io.ComfyNode):
         comfy.model_management.EXTRA_RESERVED_VRAM = core_bytes
         _set_dynamic_headroom(aimdo_bytes)
 
-        if clean_memory:
+        if free_vram:
             _evict_vram()
         return io.NodeOutput(any)
 

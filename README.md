@@ -22,7 +22,7 @@
 ### Scheduling
 
 * **Sigma Replace**: Replaces specific sigma values in a noise schedule
-* **Sigma Smoother**: Add an intermediary step(s) before full denoise
+* **Sigmas Smoother**: Add an intermediary step(s) before full denoise
 * **Sigmas Graph**: Graph the sigma curve
 * **Sigmas Rescale**: Rescales a sigma curve
 * **Sigma Remove**: Remove a sigma at the specified index
@@ -46,6 +46,7 @@
 * **Get Aspect Ratio**: Snap to the nearest known aspect ratio
 * **Image Size Calculator**: Calculates target width and height based on aspect ratio
 * **Model Downloader**: Downloads a model from a URL into a selected ComfyUI folder
+* **Select LoRA Name**: Picks a LoRA filename to share across multiple LoRA loaders
 * **Set Reserve VRAM**: Sets --reserve-vram dynamically anywhere in a workflow
 * **Show Error Message**: Halts the ComfyUI pipeline execution with a custom error message
 * **List Randomizer**: Selects a word or phrase from a string list
