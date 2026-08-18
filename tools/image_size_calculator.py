@@ -108,9 +108,9 @@ class ImageSizeCalculator(io.ComfyNode):
             target_h = math.sqrt(target_pixels / ratio)
             target_w = target_h * ratio
 
-        # Round to nearest multiple
-        final_w = int(round(target_w / multiple_of)) * multiple_of
-        final_h = int(round(target_h / multiple_of)) * multiple_of
+        # Round to nearest multiple, breaking exact ties downwards
+        final_w = math.ceil(target_w / multiple_of - 0.5 - 1e-9) * multiple_of
+        final_h = math.ceil(target_h / multiple_of - 0.5 - 1e-9) * multiple_of
 
         # Ensure we don't return 0 if the size is very small relative to multiple_of
         final_w = max(multiple_of, final_w)

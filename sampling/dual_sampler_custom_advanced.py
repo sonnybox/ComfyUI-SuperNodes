@@ -4,6 +4,7 @@ import comfy.model_management
 import comfy.nested_tensor
 import comfy.sample
 import comfy.utils
+import numpy
 from comfy_api.latest import io
 import latent_preview
 
@@ -16,23 +17,35 @@ from .utils import DualSampler, DualSamplerType, check_schedules
 END_SIGMAS_KEY = "dual_end_sigmas"
 
 
-def check_resume(latent, video_sigmas, audio_sigmas):
+def decimals(value):
+    """How many decimals the value was written with, at float32 precision."""
+    text = numpy.format_float_positional(numpy.float32(value), unique=True, trim="-")
+    return len(text.partition(".")[2])
+
+
+def check_resume(latent, video_sigmas, audio_sigmas, noise):
     previous = latent.get(END_SIGMAS_KEY)
     if previous is None:
         return
-    for stream, was, now in (
-        ("video", previous[0], float(video_sigmas[0])),
-        ("audio", previous[1], float(audio_sigmas[0])),
+    for stream, was, now, added in (
+        ("video", previous[0], float(video_sigmas[0]), noise[0]),
+        ("audio", previous[1], float(audio_sigmas[0]), noise[1]),
     ):
-        if abs(was - now) <= 1e-6 or was == 0.0:
+        if was == 0.0 or bool(added.any()):
+            # re-noised, so whatever noise level the latent was left at no longer matters
+            continue
+        # a schedule written to fewer decimals than the one it resumes still matches, so
+        # compare both at the coarser of the two, never coarser than the 4 decimals the
+        # sigma widgets expose
+        places = max(4, min(decimals(was), decimals(now)))
+        if round(was, places) == round(now, places):
             continue
         logging.warning(
-            "%s sigma at index 0 (%g) does not match the %s latent (%g), expect bad %s quality.",
+            "%s sigma at index 0 (%g) does not match the %s latent (%g).",
             stream,
             now,
             stream,
             was,
-            stream,
         )
 
 
@@ -138,7 +151,7 @@ class DualSamplerCustomAdvanced(io.ComfyNode):
         streams[1] = stream_noise(noise_audio, latent).unbind()[1]
         noise = comfy.nested_tensor.NestedTensor(streams)
 
-        check_resume(latent, video_sigmas, audio_sigmas)
+        check_resume(latent, video_sigmas, audio_sigmas, streams)
         noise_mask = latent.get("noise_mask", None)
 
         x0_output = {}
