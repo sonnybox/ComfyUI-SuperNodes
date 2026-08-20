@@ -32,6 +32,7 @@
 
 * **DualSamplerCustomAdvanced**: Samples a packed audio-video latent with a separate sigma schedule per stream.
 * **DualSamplerEulerAncestral**: Ancestral Euler with separate noise settings for the video and audio streams.
+* **DualSamplerDPMPP_SDE**: DPM-Solver++ SDE with separate noise settings for the video and audio streams.
 
 ### Tiling
 

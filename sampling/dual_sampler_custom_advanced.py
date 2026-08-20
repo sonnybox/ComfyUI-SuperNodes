@@ -11,9 +11,7 @@ import latent_preview
 from .utils import DualSampler, DualSamplerType, check_schedules
 
 # Stamped onto the output so a later pass can tell whether it is resuming from the right
-# noise level. A stream stopped at sigma s leaves the sampler multiplied by 1/(1 - s), the
-# rectified-flow convention that lets noise_scaling reconstruct it, so picking it up at a
-# different sigma rescales it by |s - s'| / (1 - s) - at s = 0.9 a mismatch of 0.05 is 50%.
+# noise level.
 END_SIGMAS_KEY = "dual_end_sigmas"
 
 
@@ -58,6 +56,13 @@ def stream_noise(source, latent):
     return comfy.nested_tensor.NestedTensor(
         comfy.utils.unpack_latents(generated, shapes)
     )
+
+
+def audio_seed(noise_audio, noise_video, added):
+    """The seed the audio stream's own sampler noise is drawn from."""
+    if not bool(added.any()):
+        return noise_video.seed
+    return noise_audio.seed
 
 
 def single_stream(packed, index):
@@ -159,7 +164,9 @@ class DualSamplerCustomAdvanced(io.ComfyNode):
             guider.model_patcher, video_sigmas.shape[-1] - 1, x0_output
         )
         disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-        sampler = dual_sampler.with_audio_sigmas(audio_sigmas)
+        sampler = dual_sampler.with_audio_sigmas(
+            audio_sigmas, audio_seed(noise_audio, noise_video, streams[1])
+        )
 
         # The audio stream is sampled at its own noise level, so process_latent_in/out and the
         # DiT must not carry it onto the video schedule. Every process_latent_out has to run

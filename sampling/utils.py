@@ -1,25 +1,8 @@
-"""Shared machinery for the dual-schedule sampler (MiniMax H3).
-
-H3 denoises a video stream and an audio stream in one DiT forward, and the two were trained
-on different flow shifts (12.0 video / 3.0 audio). Core keeps a single SIGMAS input by
-carrying the audio latent onto the video schedule, which locks the audio schedule to a
-re-shift of the video one. This sampler takes both schedules and steps each stream on its
-own, without patching core:
-
-- the carry is switched off by shadowing MiniMaxH3.audio_scale with 1.0 for the run, so the
-  sampler holds the real audio latent at its own sigma
-- the audio noise level reaches the DiT through the flow shifts it already reads from
-  transformer_options: the video shift is pinned to 1.0 (identity) and the audio shift
-  solved so the model's own mapping lands on the step's audio sigma
-- the audio stream's x0 is re-derived from the returned velocity at the audio sigma, since
-  calculate_denoised applies the single timestep sigma to the whole pack
-
-Both schedules are used exactly as given. An all-zero schedule freezes its stream: the
-latent is left alone and the DiT is told that stream is clean, which is how one stream is
-refined while the other only conditions it.
-"""
+"""Shared machinery for the dual-schedule sampler (MiniMax H3)."""
 
 import copy
+from functools import partial
+import logging
 import math
 
 from comfy.k_diffusion import sampling as k_diffusion_sampling
@@ -28,6 +11,16 @@ import comfy.samplers
 from comfy_api.latest import io
 import torch
 from tqdm.auto import trange
+
+# Video cannot run at sigma 0 because the model's noise mapping fixes 0, which would
+# pin audio to 0 as well. Running a frozen video at a constant epsilon leaves it
+# practically clean while keeping the audio mapping solvable.
+FROZEN_VIDEO_SIGMA = 0.0001
+
+# DPM++ SDE's midpoint position. Core exposes it as a widget; this node does not, so the
+# general (1 - fac)/fac blend below collapses to denoised_2 - it is kept in that form to
+# stay diffable against comfy.k_diffusion.sampling.sample_dpmpp_sde.
+DPMPP_SDE_R = 0.5
 
 # A socket of its own, so a stock SAMPLER cannot be wired into a dual sampling node.
 DualSamplerType = io.Custom("DUAL_SAMPLER")
@@ -58,8 +51,15 @@ def check_schedules(video_sigmas, audio_sigmas):
                 video_sigmas.shape[-1], audio_sigmas.shape[-1]
             )
         )
-    if video_sigmas.shape[-1] == 0:
-        return
+    # n sigmas are n - 1 steps, so two is the shortest real schedule ([1.0, 0.0] is one
+    # step and samples fine). One sigma describes a noise level and no step to take from
+    # it, which would otherwise surface as a bare StopIteration out of the driver.
+    if video_sigmas.shape[-1] < 2:
+        raise ValueError(
+            "A sigma schedule needs at least two values, which is one step, got {}. Use [1.0, 0.0] for a single step.".format(
+                video_sigmas.shape[-1]
+            )
+        )
     # The model maps between the two streams' noise levels with a transform that fixes 1.0,
     # so at 1.0 both streams are pinned together and the other one cannot be expressed.
     first_v, first_a = float(video_sigmas[0]), float(audio_sigmas[0])
@@ -106,48 +106,167 @@ def ancestral_stream(x, sigmas, o):
     return x
 
 
+def dpmpp_sde_stream(x, sigmas, o):
+    """DPM-Solver++ (stochastic) over one stream, mirroring core's sample_dpmpp_sde.
+
+    Two model evaluations per step: one at sigmas[i], then a midpoint one at sigma_s_1 that
+    is yielded with a step index of None so it does not tick the progress bar. A terminal
+    step (sigma_next 0) costs only the first.
+
+    The logSNR of a flow model is log((1 - sigma) / sigma), which is -inf at sigma 1, so the
+    first sigma is nudged off 1.0 the way core does. That happens on the local copy only -
+    the initial noise_scaling has already run against the schedule as the user wrote it,
+    which is the same split core makes between KSAMPLER.sample and the sampler function.
+    """
+    sigmas = k_diffusion_sampling.offset_first_sigma_for_snr(
+        sigmas, o.model_sampling
+    )
+    sigma_fn = partial(
+        k_diffusion_sampling.half_log_snr_to_sigma, model_sampling=o.model_sampling
+    )
+    lambda_fn = partial(
+        k_diffusion_sampling.sigma_to_half_log_snr, model_sampling=o.model_sampling
+    )
+
+    for i in range(len(sigmas) - 1):
+        denoised = yield (i, sigmas[i], x)
+        if sigmas[i + 1] == 0:
+            x = denoised
+            continue
+
+        lambda_s, lambda_t = lambda_fn(sigmas[i]), lambda_fn(sigmas[i + 1])
+        h = lambda_t - lambda_s
+        lambda_s_1 = lambda_s + DPMPP_SDE_R * h
+        fac = 1 / (2 * DPMPP_SDE_R)
+
+        sigma_s_1 = sigma_fn(lambda_s_1)
+
+        # for a flow model exp(lambda) is (1 - sigma) / sigma, so these are the RF alphas
+        alpha_s = sigmas[i] * lambda_s.exp()
+        alpha_s_1 = sigma_s_1 * lambda_s_1.exp()
+        alpha_t = sigmas[i + 1] * lambda_t.exp()
+
+        # Step 1. get_ancestral_step takes exp(-lambda), the variance-preserving sigma, not
+        # the flow sigma - the noise split is computed in that parameterisation.
+        sd, su = k_diffusion_sampling.get_ancestral_step(
+            lambda_s.neg().exp(), lambda_s_1.neg().exp(), o.eta
+        )
+        lambda_s_1_ = sd.log().neg()
+        h_ = lambda_s_1_ - lambda_s
+        x_2 = (alpha_s_1 / alpha_s) * (-h_).exp() * x - alpha_s_1 * (
+            -h_
+        ).expm1() * denoised
+        if o.eta > 0 and o.s_noise > 0:
+            x_2 = x_2 + alpha_s_1 * o.noise(sigmas[i], sigma_s_1) * o.s_noise * su
+        denoised_2 = yield (None, sigma_s_1, x_2)
+
+        # Step 2
+        sd, su = k_diffusion_sampling.get_ancestral_step(
+            lambda_s.neg().exp(), lambda_t.neg().exp(), o.eta
+        )
+        lambda_t_ = sd.log().neg()
+        h_ = lambda_t_ - lambda_s
+        denoised_d = (1 - fac) * denoised + fac * denoised_2
+        x = (alpha_t / alpha_s) * (-h_).exp() * x - alpha_t * (
+            -h_
+        ).expm1() * denoised_d
+        if o.eta > 0 and o.s_noise > 0:
+            x = x + alpha_t * o.noise(sigmas[i], sigmas[i + 1]) * o.s_noise * su
+    return x
+
+
+def brownian_noise(x, sigmas, seed, cpu):
+    """A torchsde Brownian path over one stream's own schedule.
+
+    An SDE solver draws twice inside a step and both draws have to come off the same path,
+    so the independent draw ancestral_stream uses will not do. Indexing the path by this
+    stream's sigmas rather than the video's is what makes the audio stream's solver
+    self-consistent when the two schedules differ.
+    """
+    positive = sigmas[sigmas > 0]
+    if positive.numel() == 0 or float(positive.min()) == float(sigmas.max()):
+        # A constant schedule - the frozen-video path - leaves the tree no interval to span.
+        # Nothing rides on the draw: a constant schedule's ancestral split is 0 at every
+        # step, so whatever comes back is multiplied by zero.
+        return k_diffusion_sampling.default_noise_sampler(x, seed=seed)
+    return k_diffusion_sampling.BrownianTreeNoiseSampler(
+        x, positive.min(), sigmas.max(), seed=seed, cpu=cpu
+    )
+
+
 class StreamOptions:
     """Per-stream knobs and noise source handed to the sampler coroutine."""
 
-    def __init__(self, eta, s_noise, noise):
+    def __init__(self, eta, s_noise, noise, model_sampling):
         self.eta, self.s_noise, self.noise = eta, s_noise, noise
+        self.model_sampling = model_sampling
 
 
 class DualSampler(comfy.samplers.Sampler):
     """Steps a packed [video, audio] latent on two independent sigma schedules.
 
-    The video schedule arrives through the normal `sigmas` argument; the audio schedule is
-    attached by DualSamplerCustomAdvanced via with_audio_sigmas().
+    The video schedule arrives through the normal `sigmas` argument; the audio schedule and
+    the audio stream's seed are attached by DualSamplerCustomAdvanced via
+    with_audio_sigmas().
+
+    stream_fn selects the algorithm both streams are stepped with. noise_device picks where
+    the SDE solvers build their Brownian path, and doubles as the flag for needing one at
+    all: None means the algorithm is happy with independent draws.
     """
 
     def __init__(
-        self, eta_video=1.0, eta_audio=1.0, s_noise_video=1.0, s_noise_audio=1.0
+        self,
+        eta_video=1.0,
+        eta_audio=1.0,
+        s_noise_video=1.0,
+        s_noise_audio=1.0,
+        stream_fn=ancestral_stream,
+        noise_device=None,
     ):
         self.eta_video = eta_video
         self.eta_audio = eta_audio
         self.s_noise_video = s_noise_video
         self.s_noise_audio = s_noise_audio
+        self.stream_fn = stream_fn
+        self.noise_device = noise_device
         self.audio_sigmas = None
+        self.audio_seed = None
 
-    def with_audio_sigmas(self, audio_sigmas):
+    def with_audio_sigmas(self, audio_sigmas, audio_seed=None):
         sampler = copy.copy(self)
         sampler.audio_sigmas = audio_sigmas
+        sampler.audio_seed = audio_seed
         return sampler
 
-    def stream_options(self, x, split, video, seed, model_sampling):
-        """Noise source for one stream.
+    def stream_options(self, x, split, video, seed, model_sampling, sigmas):
+        """Noise source and knobs for one stream.
 
-        The sampler is built on the *packed* shape and sliced, so with equal schedules the
-        two streams draw exactly the tensor core's single sampler would have drawn.
+        Without a noise device the sampler is built on the *packed* shape and sliced, so
+        with equal schedules the two streams draw exactly the tensor core's single sampler
+        would have drawn. With one, each stream gets its own Brownian path over its own
+        schedule instead, which is what an SDE solver needs.
         """
         region = slice(None, split) if video else slice(split, None)
-        draw = k_diffusion_sampling.default_noise_sampler(x, seed=seed)
+        if self.noise_device is None:
+            draw = k_diffusion_sampling.default_noise_sampler(x, seed=seed)
+
+            def noise(a, b):
+                return draw(a, b)[..., region]
+        else:
+            # a path of its own per stream, so the audio solver is not steered by the video
+            # seed; the sliced path above stays on one seed to keep its core parity
+            if not video and self.audio_seed is not None:
+                seed = self.audio_seed
+            noise = brownian_noise(
+                x[..., region], sigmas, seed, self.noise_device == "cpu"
+            )
         noise_scale = getattr(model_sampling, "noise_scale", 1.0)
         return StreamOptions(
             eta=self.eta_video if video else self.eta_audio,
             s_noise=(self.s_noise_video if video else self.s_noise_audio)
             * noise_scale,
-            noise=lambda a, b: draw(a, b)[..., region],
+            noise=noise,
+            model_sampling=model_sampling,
         )
 
     def sample(
@@ -218,6 +337,16 @@ class DualSampler(comfy.samplers.Sampler):
             raise ValueError(
                 "both schedules are all zeros, so there is nothing to sample."
             )
+        if frozen_v:
+            # audio_shift_for cannot solve against a video sigma of 0 - the model's mapping
+            # fixes 0, so the audio would be pinned there too. A constant epsilon leaves the
+            # video untouched and keeps the mapping solvable.
+            logging.info(
+                "Received an all-zero video schedule, running it at a constant %g instead.",
+                FROZEN_VIDEO_SIGMA,
+            )
+            video_sigmas = torch.full_like(video_sigmas, FROZEN_VIDEO_SIGMA)
+            frozen_v = False
 
         # each stream is brought up to its own first sigma, so the two can start anywhere
         x = torch.empty_like(noise)
@@ -234,25 +363,36 @@ class DualSampler(comfy.samplers.Sampler):
             self.max_denoise(model_wrap, audio_sigmas),
         )
         s_in = x.new_ones([x.shape[0]])
+
+        # Where a stream sits while it is not being stepped: a frozen one never moves, a
+        # finished one waits at its last sigma for the other to catch up. Audio at 0 reads
+        # as clean to the model, which is what a frozen audio stream wants; video at 0 does
+        # not, since audio_shift_for cannot solve against it, so video holds at
+        # FROZEN_VIDEO_SIGMA for the same reason the frozen video path does.
         held_v, held_a = x[..., :split], x[..., split:]
+        held_sigma_v, held_sigma_a = FROZEN_VIDEO_SIGMA, 0.0
 
         # a frozen stream is never stepped, so it needs no noise source
         opts_v = (
             None
             if frozen_v
-            else self.stream_options(x, split, True, seed, model_sampling)
+            else self.stream_options(
+                x, split, True, seed, model_sampling, video_sigmas
+            )
         )
         opts_a = (
             None
             if frozen_a
-            else self.stream_options(x, split, False, seed, model_sampling)
+            else self.stream_options(
+                x, split, False, seed, model_sampling, audio_sigmas
+            )
         )
 
         gen_v = (
-            None if frozen_v else ancestral_stream(held_v, video_sigmas, opts_v)
+            None if frozen_v else self.stream_fn(held_v, video_sigmas, opts_v)
         )
         gen_a = (
-            None if frozen_a else ancestral_stream(held_a, audio_sigmas, opts_a)
+            None if frozen_a else self.stream_fn(held_a, audio_sigmas, opts_a)
         )
 
         progress = trange(total_steps, disable=disable_pbar)
@@ -261,12 +401,25 @@ class DualSampler(comfy.samplers.Sampler):
         done_v = held_v if frozen_v else None
         done_a = held_a if frozen_a else None
         while True:
-            step = (req_v or req_a)[0]
+            # a substep carries no step index; take the first real one on offer, so a
+            # stream mid-step does not swallow the other's finished step
+            step = next(
+                (
+                    req[0]
+                    for req in (req_v, req_a)
+                    if req is not None and req[0] is not None
+                ),
+                None,
+            )
             sigma_v, xv = (
-                (req_v[1], req_v[2]) if req_v is not None else (0.0, held_v)
+                (req_v[1], req_v[2])
+                if req_v is not None
+                else (held_sigma_v, held_v)
             )
             sigma_a, xa = (
-                (req_a[1], req_a[2]) if req_a is not None else (0.0, held_a)
+                (req_a[1], req_a[2])
+                if req_a is not None
+                else (held_sigma_a, held_a)
             )
             sigma_v, sigma_a = float(sigma_v), float(sigma_a)
             x = torch.cat([xv, xa], dim=-1)
@@ -318,26 +471,25 @@ class DualSampler(comfy.samplers.Sampler):
                     callback(step, denoised, x, total_steps)
                 progress.update(1)
 
-            if gen_v is not None:
+            # a stream that runs out first is pinned where it landed and keeps conditioning
+            # the other; only when both are done does the loop end
+            if req_v is not None:
                 try:
                     req_v = gen_v.send(denoised[..., :split])
                 except StopIteration as stop:
                     req_v, done_v = None, stop.value
-            if gen_a is not None:
+                    held_v = done_v
+                    last_v = float(video_sigmas[-1])
+                    held_sigma_v = max(last_v, FROZEN_VIDEO_SIGMA)
+            if req_a is not None:
                 try:
                     req_a = gen_a.send(denoised[..., split:])
                 except StopIteration as stop:
                     req_a, done_a = None, stop.value
+                    held_a = done_a
+                    held_sigma_a = float(audio_sigmas[-1])
             if req_v is None and req_a is None:
                 break
-            if (
-                gen_v is not None
-                and gen_a is not None
-                and (req_v is None) != (req_a is None)
-            ):
-                raise RuntimeError(
-                    "dual sampler streams desynchronised; both schedules must have the same length"
-                )
         progress.close()
 
         return torch.cat(
