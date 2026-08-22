@@ -67,7 +67,7 @@ class SuperModelDownloader(io.ComfyNode):
         if not url.strip():
             raise ValueError("No URL provided.")
 
-        valid_extensions = [".safetensors", ".pth", ".pt", ".onnx", ".ckpt"]
+        valid_extensions = [".safetensors", ".pth", ".pt", ".onnx"]
         alias_input = alias.strip()
         alias_raw_name = ""
         alias_base = ""
@@ -185,7 +185,7 @@ class SuperModelDownloader(io.ComfyNode):
         ext = os.path.splitext(filename)[1].lower()
         if ext not in valid_extensions_set:
             raise ValueError(
-                f"File type '{ext}' is not supported. Only .safetensors and .pth files are allowed."
+                f"File type '{ext}' is not supported. Allowed: {', '.join(valid_extensions)}."
             )
 
         if alias_base:
