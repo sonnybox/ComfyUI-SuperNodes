@@ -1,5 +1,8 @@
 # ComfyUI SuperNodes by SuperCC
 
+> [!IMPORTANT]
+> I no longer publish distinct versions to Comfy registry. The latest git commit / nightly version is the only supported version. The 0.3.6 release will quickly be out of date.
+
 ## Current Nodes
 
 ### Color

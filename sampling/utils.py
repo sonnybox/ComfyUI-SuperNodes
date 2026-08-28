@@ -2,6 +2,7 @@
 
 import copy
 from functools import partial
+import hashlib
 import logging
 import math
 
@@ -194,6 +195,27 @@ def brownian_noise(x, sigmas, seed, cpu):
     )
 
 
+def stage_offset(video_sigmas, audio_sigmas):
+    """A stable per-stage offset for the ancestral noise stream.
+
+    DisableNoise reports seed 0 on every pass, so two stages chained over a latent of the
+    same shape draw the identical ancestral noise and stamp the same pattern in twice. The
+    schedule is what tells one stage from the next, so it is what the offset comes from.
+    Two stages given the exact same schedule still collide - from in here they are the same
+    stage - which is fine for splitting one schedule across passes, the case this covers.
+
+    blake2b rather than hash(), which is salted per process and would not reproduce across
+    restarts. Masked to 62 bits: default_noise_sampler adds 1 for a CPU generator, so the
+    result needs headroom under the 64-bit seed limit.
+    """
+    payload = b"".join(
+        s.detach().to("cpu", torch.float32).contiguous().numpy().tobytes()
+        for s in (video_sigmas, audio_sigmas)
+    )
+    digest = hashlib.blake2b(payload, digest_size=8).digest()
+    return int.from_bytes(digest, "big") & ((1 << 62) - 1)
+
+
 class StreamOptions:
     """Per-stream knobs and noise source handed to the sampler coroutine."""
 
@@ -238,17 +260,25 @@ class DualSampler(comfy.samplers.Sampler):
         sampler.audio_seed = audio_seed
         return sampler
 
-    def stream_options(self, x, split, video, seed, model_sampling, sigmas):
+    def stream_options(
+        self, x, split, video, seed, model_sampling, sigmas, offset=0
+    ):
         """Noise source and knobs for one stream.
 
         Without a noise device the sampler is built on the *packed* shape and sliced, so
         with equal schedules the two streams draw exactly the tensor core's single sampler
         would have drawn. With one, each stream gets its own Brownian path over its own
         schedule instead, which is what an SDE solver needs.
+
+        offset separates one chained stage's draws from the next's. It lands after the audio
+        seed is picked, so both streams carry it and stay distinct from each other; the same
+        value goes to both, which is what keeps the sliced path's core parity intact.
         """
         region = slice(None, split) if video else slice(split, None)
         if self.noise_device is None:
-            draw = k_diffusion_sampling.default_noise_sampler(x, seed=seed)
+            draw = k_diffusion_sampling.default_noise_sampler(
+                x, seed=None if seed is None else seed ^ offset
+            )
 
             def noise(a, b):
                 return draw(a, b)[..., region]
@@ -258,7 +288,10 @@ class DualSampler(comfy.samplers.Sampler):
             if not video and self.audio_seed is not None:
                 seed = self.audio_seed
             noise = brownian_noise(
-                x[..., region], sigmas, seed, self.noise_device == "cpu"
+                x[..., region],
+                sigmas,
+                None if seed is None else seed ^ offset,
+                self.noise_device == "cpu",
             )
         noise_scale = getattr(model_sampling, "noise_scale", 1.0)
         return StreamOptions(
@@ -330,6 +363,15 @@ class DualSampler(comfy.samplers.Sampler):
         check_schedules(video_sigmas, audio_sigmas)
         total_steps = len(video_sigmas) - 1
 
+        # A pass handed no noise is resuming, and carries DisableNoise's fixed seed 0 - the
+        # same one every stage of a chain reports. Spread those apart by the schedule, taken
+        # here while it is still the one the user wrote: the frozen-video path below rewrites
+        # it. A pass that was handed noise already has a seed of its own, so it keeps it and
+        # nothing that reproduces today changes.
+        offset = 0
+        if seed is not None and not bool(noise.any()):
+            offset = stage_offset(video_sigmas, audio_sigmas)
+
         # an all-zero schedule freezes its stream: the latent is already x0, so it is never
         # stepped and the DiT is told t = 1 (clean) for it every pass
         frozen_v, frozen_a = is_frozen(video_sigmas), is_frozen(audio_sigmas)
@@ -377,14 +419,14 @@ class DualSampler(comfy.samplers.Sampler):
             None
             if frozen_v
             else self.stream_options(
-                x, split, True, seed, model_sampling, video_sigmas
+                x, split, True, seed, model_sampling, video_sigmas, offset
             )
         )
         opts_a = (
             None
             if frozen_a
             else self.stream_options(
-                x, split, False, seed, model_sampling, audio_sigmas
+                x, split, False, seed, model_sampling, audio_sigmas, offset
             )
         )
 
