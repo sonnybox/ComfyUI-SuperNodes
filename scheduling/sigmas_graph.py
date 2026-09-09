@@ -3,16 +3,14 @@ import random
 
 from comfy_api.latest import io, ui
 import folder_paths
-
 import matplotlib
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 from PIL import Image
 import torch
-
 
 
 class SigmasGraph(io.ComfyNode):
@@ -68,7 +66,6 @@ class SigmasGraph(io.ComfyNode):
         ax.set_title("")
         ax.set_xlabel("Step", fontsize=18)
         ax.set_ylabel("Sigma", fontsize=18)
-        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.1f"))
         ax.tick_params(axis="both", which="major", labelsize=14)
         ax.grid(True, which="both", linestyle="--", alpha=0.3)
         plt.tight_layout()
