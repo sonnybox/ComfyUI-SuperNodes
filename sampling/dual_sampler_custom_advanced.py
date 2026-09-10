@@ -4,20 +4,26 @@ import comfy.model_management
 import comfy.nested_tensor
 import comfy.sample
 import comfy.utils
-import numpy
 from comfy_api.latest import io
 import latent_preview
+import numpy
 
-from .utils import DualSampler, DualSamplerType, check_schedules
+from .utils import (
+    DualSampler,
+    DualSamplerType,
+    check_schedules,
+    stock_audio_sigmas,
+)
 
-# Stamped onto the output so a later pass can tell whether it is resuming from the right
-# noise level.
+# Used to keep track the resumption noise level.
 END_SIGMAS_KEY = "dual_end_sigmas"
 
 
 def decimals(value):
     """How many decimals the value was written with, at float32 precision."""
-    text = numpy.format_float_positional(numpy.float32(value), unique=True, trim="-")
+    text = numpy.format_float_positional(
+        numpy.float32(value), unique=True, trim="-"
+    )
     return len(text.partition(".")[2])
 
 
@@ -89,13 +95,14 @@ class DualSamplerCustomAdvanced(io.ComfyNode):
                 ),
                 io.Guider.Input("guider"),
                 DualSamplerType.Input("dual_sampler"),
+                io.Latent.Input(
+                    "av_latent", tooltip="Packed video + audio latent."
+                ),
                 io.Sigmas.Input("video_sigmas"),
                 io.Sigmas.Input(
                     "audio_sigmas",
+                    optional=True,
                     tooltip="Use the same number of steps as video_sigmas.",
-                ),
-                io.Latent.Input(
-                    "av_latent", tooltip="Packed video + audio latent."
                 ),
             ],
             outputs=[
@@ -119,13 +126,12 @@ class DualSamplerCustomAdvanced(io.ComfyNode):
         noise_audio,
         guider,
         dual_sampler,
-        video_sigmas,
-        audio_sigmas,
         av_latent,
+        video_sigmas,
+        audio_sigmas=None,
     ) -> io.NodeOutput:
         if not isinstance(dual_sampler, DualSampler):
             raise ValueError("dual_sampler must come from a Dual Sampler node.")
-        check_schedules(video_sigmas, audio_sigmas)
 
         model = guider.model_patcher.model
         if not hasattr(model, "audio_scale"):
@@ -134,6 +140,13 @@ class DualSamplerCustomAdvanced(io.ComfyNode):
                     model.__class__.__name__
                 )
             )
+
+        # No audio schedule of its own returns to stock calculation
+        if audio_sigmas is None:
+            audio_sigmas = stock_audio_sigmas(
+                video_sigmas, guider.model_patcher
+            )
+        check_schedules(video_sigmas, audio_sigmas)
 
         latent = av_latent
         latent_image = latent["samples"]

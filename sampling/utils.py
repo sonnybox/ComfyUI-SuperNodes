@@ -39,6 +39,31 @@ def audio_shift_for(sigma_v, sigma_a):
     return sigma_a * (1.0 - sigma_v) / (sigma_v * (1.0 - sigma_a))
 
 
+def stock_audio_sigmas(video_sigmas, model_patcher):
+    """The audio schedule stock MiniMax H3 sampling pairs with this video schedule.
+
+    Read from the two places the model itself reads: a ModelSamplingMiniMaxH3 override in
+    transformer_options, otherwise the checkpoint's own shifts (usually 12.0 and 3.0).
+    """
+    # imported here so a ComfyUI without the minimax module still loads the other samplers
+    from comfy.ldm.minimax.model import time_shift_sigma
+
+    diffusion_model = model_patcher.model.diffusion_model
+    options = model_patcher.model_options.get("transformer_options", {})
+    shift_video = float(
+        options.get(
+            "minimax_h3_sigma_shift_video", diffusion_model.sigma_shift_video
+        )
+    )
+    shift_audio = float(
+        options.get(
+            "minimax_h3_sigma_shift_audio", diffusion_model.sigma_shift_audio
+        )
+    )
+    # time_shift_sigma is pure arithmetic, so it maps the whole schedule elementwise.
+    return time_shift_sigma(video_sigmas, shift_video, shift_audio)
+
+
 def is_frozen(sigmas):
     """An all-zero schedule means: leave this stream alone, it is already x0."""
     return bool((sigmas == 0).all())
@@ -123,10 +148,12 @@ def dpmpp_sde_stream(x, sigmas, o):
         sigmas, o.model_sampling
     )
     sigma_fn = partial(
-        k_diffusion_sampling.half_log_snr_to_sigma, model_sampling=o.model_sampling
+        k_diffusion_sampling.half_log_snr_to_sigma,
+        model_sampling=o.model_sampling,
     )
     lambda_fn = partial(
-        k_diffusion_sampling.sigma_to_half_log_snr, model_sampling=o.model_sampling
+        k_diffusion_sampling.sigma_to_half_log_snr,
+        model_sampling=o.model_sampling,
     )
 
     for i in range(len(sigmas) - 1):
@@ -158,7 +185,9 @@ def dpmpp_sde_stream(x, sigmas, o):
             -h_
         ).expm1() * denoised
         if o.eta > 0 and o.s_noise > 0:
-            x_2 = x_2 + alpha_s_1 * o.noise(sigmas[i], sigma_s_1) * o.s_noise * su
+            x_2 = (
+                x_2 + alpha_s_1 * o.noise(sigmas[i], sigma_s_1) * o.s_noise * su
+            )
         denoised_2 = yield (None, sigma_s_1, x_2)
 
         # Step 2
@@ -356,7 +385,6 @@ class DualSampler(comfy.samplers.Sampler):
         transformer_options = model_options.setdefault(
             "transformer_options", {}
         )
-        transformer_options["sample_sigmas_audio"] = audio_sigmas
 
         seed = extra_args.get("seed", None)
 
