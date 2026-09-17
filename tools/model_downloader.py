@@ -169,9 +169,14 @@ class SuperModelDownloader(io.ComfyNode):
         cd = response.headers.get("content-disposition")
         if cd:
             filenames = re.findall('filename="?([^"]+)"?', cd)
+            # Header is remote-controlled; strip any path so it cannot escape dest_dir.
             filename = (
-                filenames[0] if filenames else "downloaded_model.safetensors"
+                os.path.basename(filenames[0].replace("\\", "/"))
+                if filenames
+                else ""
             )
+            if not filename:
+                filename = "downloaded_model.safetensors"
         else:
             parsed_url = urllib.parse.urlparse(response.url)
             filename = os.path.basename(parsed_url.path)
@@ -201,6 +206,13 @@ class SuperModelDownloader(io.ComfyNode):
         dest_dir = dest_dirs[0]
         os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, filename)
+
+        if os.path.dirname(os.path.realpath(dest_path)) != os.path.realpath(
+            dest_dir
+        ):
+            raise ValueError(
+                f"Refusing to write '{filename}' outside of '{destination}'."
+            )
 
         is_alias = bool(alias_base)
         total_size = int(response.headers.get("content-length", 0))

@@ -14,12 +14,18 @@ _DEFAULTS = {}
 
 
 def _dynamic_headroom():
-    """The native DynamicVRAM headroom global, or None when it isn't active."""
+    """The native DynamicVRAM headroom in bytes, or None when it isn't active."""
     lib = getattr(aimdo_control, "lib", None)
     if lib is None:
         return None
+    getter = getattr(lib, "get_simple_vram_headroom", None)
+    if getter is not None:
+        getter.argtypes = []
+        getter.restype = ctypes.c_int64
+        return int(getter())
+    # aimdo before 0.5 exported the global itself instead of a getter
     try:
-        return ctypes.c_int64.in_dll(lib, "simple_vram_headroom")
+        return ctypes.c_int64.in_dll(lib, "simple_vram_headroom").value
     except ValueError:
         return None
 
@@ -31,7 +37,7 @@ def _snapshot_defaults():
     if "aimdo" not in _DEFAULTS:
         headroom = _dynamic_headroom()
         if headroom is not None:
-            _DEFAULTS["aimdo"] = headroom.value
+            _DEFAULTS["aimdo"] = headroom
 
 
 _snapshot_defaults()
@@ -42,7 +48,8 @@ def _resolve(reserved_gb):
 
     0.0 restores the boot-time defaults rather than reserving nothing, since
     that is the out-of-box experience people actually want back. Anything
-    negative is the real zero, so the scale stays continuous.
+    negative is the lowest reserve allowed: core goes to a real 0, aimdo to its
+    own 256 MB floor.
     """
     if reserved_gb < 0:
         return 0, 0
@@ -95,7 +102,9 @@ def _evict_vram():
         model = loaded.model
         if model is None:
             continue
-        freed_total += model.partially_unload(model.offload_device, 1e30)
+        # int(1e30), not 10**30: partially_unload's "free everything" sentinel is
+        # `>= 1e30`, and the float 1e30 is the larger of the two exact values.
+        freed_total += model.partially_unload(model.offload_device, int(1e30))
 
     # Evicted weights can leave unreachable tensors holding caching-allocator
     # blocks, which empty_cache can only hand back once they are collected.
@@ -121,7 +130,7 @@ class SetReserveVRAM(io.ComfyNode):
                     min=-1.0,
                     max=128.0,
                     step=0.1,
-                    tooltip="Set to 0 to restore values at start up. Set a negative number for true zero reserve.",
+                    tooltip="0 restores startup values. <0 is the minimum reserve.",
                 ),
                 io.Boolean.Input(
                     "free_vram",
