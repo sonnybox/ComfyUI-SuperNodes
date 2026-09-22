@@ -5,8 +5,6 @@ QUANTITY = "ancestry"
 MODEL_TYPES = ["flow", "legacy"]
 ETA_HARD_MAX = 100.0
 SEARCH_ITERATIONS = 100
-# what percentage points of noise power counts as reached
-TOLERANCE = 0.001
 
 
 def step_noise(sigma, sigma_next, eta, flow):
@@ -78,11 +76,14 @@ def has_ancestral_steps(sigmas, flow):
 
 
 def ancestry_of(sigmas, eta, flow, s_noise=1.0):
-    """Share of the final noise power that still comes from the starting noise.
+    """Share of the final noise amplitude that still comes from the starting noise.
 
-    Tracks the starting noise's power and the fresh noise's power separately. With s_noise
-    1.0 their sum is always sigma**2 and this reduces to the product of the per-step
-    carries, but s_noise over- or under-fills the renoise, so the two are tracked apart.
+    Powers are tracked rather than amplitudes, because s_noise over- or under-fills the
+    renoise and only the two powers stay separable through that. The return is the
+    amplitude ratio, the square root of the power share, which is the correlation between
+    the final noise and the starting noise. Amplitude is the perceptual axis: it spreads
+    the useful eta range across the whole slider, where the power share squashes it into
+    the bottom half.
     """
     ancestral = sigmas[0] ** 2
     fresh = 0.0
@@ -94,25 +95,26 @@ def ancestry_of(sigmas, eta, flow, s_noise=1.0):
         ancestral *= carry**2
         fresh = fresh * carry**2 + s_noise**2 * fresh_var
     total = ancestral + fresh
-    return ancestral / total if total > 0.0 else 0.0
+    return (ancestral / total) ** 0.5 if total > 0.0 else 0.0
 
 
 def eta_for_ancestry(sigmas, target, flow, s_noise, ceiling):
     """Invert ancestry_of. Returns (eta, reachable).
 
-    Finds the lowest eta that brings ancestry within TOLERANCE of the target, searching only
-    below the ceiling, where ancestry falls monotonically, so bisection is valid.
+    Finds the lowest eta that brings ancestry to the target, searching only below the
+    ceiling, where ancestry falls monotonically, so bisection is valid.
     """
-    goal = max(target, TOLERANCE)
-    if ancestry_of(sigmas, 0.0, flow, s_noise) <= goal:
-        return 0.0, True
     hi = ceiling * (1.0 - 1e-9)
-    if ancestry_of(sigmas, hi, flow, s_noise) > goal:
+    if target <= 0.0:
+        return hi, False
+    if ancestry_of(sigmas, 0.0, flow, s_noise) <= target:
+        return 0.0, True
+    if ancestry_of(sigmas, hi, flow, s_noise) > target:
         return hi, False
     lo = 0.0
     for _ in range(SEARCH_ITERATIONS):
         mid = (lo + hi) / 2.0
-        if ancestry_of(sigmas, mid, flow, s_noise) > goal:
+        if ancestry_of(sigmas, mid, flow, s_noise) > target:
             lo = mid
         else:
             hi = mid
@@ -178,7 +180,7 @@ class SigmaAncestry(io.ComfyNode):
                     max=100.0,
                     step=0.5,
                     round=False,
-                    tooltip="% of final noise power from the starting noise. 100% is Euler.",
+                    tooltip="% of the final noise still correlated with the starting noise. 100% is Euler, 0% is as stochastic as the schedule allows.",
                 ),
                 io.Combo.Input(
                     "model_type",
