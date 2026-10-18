@@ -205,6 +205,70 @@ def dpmpp_sde_stream(x, sigmas, o):
     return x
 
 
+def res_multistep_stream(x, sigmas, o):
+    """Second-order multistep RES over one stream, mirroring core's res_multistep.
+
+    eta 0 is core's res_multistep. Above 0 it is ancestral, but with the rectified flow
+    split ancestral_stream uses instead of core's get_ancestral_step, which leaves a flow
+    model's latent off its noise path and is what burns res_multistep_ancestral images.
+    """
+    sigma_fn = lambda t: t.neg().exp()  # noqa: E731
+    t_fn = lambda sigma: sigma.log().neg()  # noqa: E731
+    phi1_fn = lambda t: torch.expm1(t) / t  # noqa: E731
+    phi2_fn = lambda t: (phi1_fn(t) - 1.0) / t  # noqa: E731
+
+    old_sigma_down = None
+    old_denoised = None
+    for i in range(len(sigmas) - 1):
+        denoised = yield (i, sigmas[i], x)
+        if sigmas[i + 1] == 0:
+            x = denoised
+            continue
+
+        downstep_ratio = 1 + (sigmas[i + 1] / sigmas[i] - 1) * o.eta
+        sigma_down = sigmas[i + 1] * downstep_ratio
+        if old_denoised is None:
+            # Euler method
+            d = (x - denoised) / sigmas[i]
+            x = x + d * (sigma_down - sigmas[i])
+        else:
+            # Second order multistep method in https://arxiv.org/pdf/2308.02157
+            t, t_old, t_next, t_prev = (
+                t_fn(sigmas[i]),
+                t_fn(old_sigma_down),
+                t_fn(sigma_down),
+                t_fn(sigmas[i - 1]),
+            )
+            h = t_next - t
+            c2 = (t_prev - t_old) / h
+
+            phi1_val, phi2_val = phi1_fn(-h), phi2_fn(-h)
+            # a constant schedule (the frozen-video path) gives h = 0, which these zero out
+            b1 = torch.nan_to_num(phi1_val - phi2_val / c2, nan=0.0)
+            b2 = torch.nan_to_num(phi2_val / c2, nan=0.0)
+            x = sigma_fn(h) * x + h * (b1 * denoised + b2 * old_denoised)
+
+        if o.eta > 0:
+            alpha_ip1 = 1 - sigmas[i + 1]
+            alpha_down = 1 - sigma_down
+            # clamped: on a constant schedule this is 0 up to rounding, and sqrt(-eps) is nan
+            renoise_coeff = (
+                (
+                    sigmas[i + 1] ** 2
+                    - sigma_down**2 * alpha_ip1**2 / alpha_down**2
+                )
+                .clamp(min=0)
+                .sqrt()
+            )
+            x = (alpha_ip1 / alpha_down) * x + o.noise(
+                sigmas[i], sigmas[i + 1]
+            ) * o.s_noise * renoise_coeff
+
+        old_denoised = denoised
+        old_sigma_down = sigma_down
+    return x
+
+
 def brownian_noise(x, sigmas, seed, cpu):
     """A torchsde Brownian path over one stream's own schedule.
 
@@ -391,13 +455,12 @@ class DualSampler(comfy.samplers.Sampler):
         check_schedules(video_sigmas, audio_sigmas)
         total_steps = len(video_sigmas) - 1
 
-        # A pass handed no noise is resuming, and carries DisableNoise's fixed seed 0 - the
-        # same one every stage of a chain reports. Spread those apart by the schedule, taken
-        # here while it is still the one the user wrote: the frozen-video path below rewrites
-        # it. A pass that was handed noise already has a seed of its own, so it keeps it and
-        # nothing that reproduces today changes.
+        # The seed comes from the video noise source, so a video stream handed no noise is
+        # resuming on DisableNoise's fixed seed 0 - the same one every stage of a chain
+        # reports, and the same one a RandomNoise seed 0 stage drew with - even when the
+        # audio stream is re-noised.
         offset = 0
-        if seed is not None and not bool(noise.any()):
+        if seed is not None and not bool(noise[..., :split].any()):
             offset = stage_offset(video_sigmas, audio_sigmas)
 
         # an all-zero schedule freezes its stream: the latent is already x0, so it is never
