@@ -227,7 +227,9 @@ def res_multistep_stream(x, sigmas, o):
 
         downstep_ratio = 1 + (sigmas[i + 1] / sigmas[i] - 1) * o.eta
         sigma_down = sigmas[i + 1] * downstep_ratio
-        if old_denoised is None:
+        # core takes Euler at sigma_down == 0; past the eta ceiling sigma_down goes
+        # negative and the multistep's log turns nan, so Euler covers that too
+        if old_denoised is None or sigma_down <= 0:
             # Euler method
             d = (x - denoised) / sigmas[i]
             x = x + d * (sigma_down - sigmas[i])
@@ -243,9 +245,22 @@ def res_multistep_stream(x, sigmas, o):
             c2 = (t_prev - t_old) / h
 
             phi1_val, phi2_val = phi1_fn(-h), phi2_fn(-h)
+            b2 = phi2_val / c2
+            if o.eta > 0:
+                # The multistep extrapolates the x0 estimate linearly in t across the whole
+                # step. Eta's downstep lengthens the step past sigmas[i + 1], and near the
+                # eta ceiling sigma_down -> 0 sends h, and that extrapolation, to infinity.
+                # Hold the estimate flat past t(sigmas[i + 1]), where the model is next
+                # asked anyway. The weight is the integral of min(s - t, h0) under
+                # e^-(t_next - s), which is h0^2 phi2(-h0) at h == h0, so eta 0 is core.
+                h0 = t_fn(sigmas[i + 1]) - t
+                held = h0**2 * phi2_fn(-h0) * (h0 - h).exp() - h0 * torch.expm1(
+                    h0 - h
+                )
+                b2 = held / (h * (t_prev - t_old))
             # a constant schedule (the frozen-video path) gives h = 0, which these zero out
-            b1 = torch.nan_to_num(phi1_val - phi2_val / c2, nan=0.0)
-            b2 = torch.nan_to_num(phi2_val / c2, nan=0.0)
+            b1 = torch.nan_to_num(phi1_val - b2, nan=0.0)
+            b2 = torch.nan_to_num(b2, nan=0.0)
             x = sigma_fn(h) * x + h * (b1 * denoised + b2 * old_denoised)
 
         if o.eta > 0:
