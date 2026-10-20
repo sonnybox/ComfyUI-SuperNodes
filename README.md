@@ -30,6 +30,7 @@
 * **Sigmas Rescale**: Rescales a sigma curve
 * **Sigma Remove**: Remove a sigma at the specified index
 * **Sigma Insert**: Add a sigma at the specified index
+* **Sigma Stride**: Select every nth sigma, optionally keeping the first and last
 
 ### Sampling
 
