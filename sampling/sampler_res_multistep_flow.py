@@ -1,11 +1,10 @@
 from comfy.k_diffusion import sampling as k_diffusion_sampling
 import comfy.model_sampling
-import comfy.samplers
 from comfy_api.latest import io
 import torch
 from tqdm.auto import trange
 
-from .utils import StreamOptions, res_multistep_stream
+from .utils import ChainedKSAMPLER, StreamOptions, res_multistep_stream
 
 
 @torch.no_grad()
@@ -19,6 +18,7 @@ def sample_res_multistep_flow(
     eta=0.0,
     s_noise=1.0,
     noise_sampler=None,
+    seed_offset=0,
 ):
     """Core's res_multistep at eta 0, the dual sampler's flow-model ancestral above it.
 
@@ -33,9 +33,10 @@ def sample_res_multistep_flow(
         raise ValueError(
             "eta above 0 uses the flow-model noise split, which needs a rectified flow (CONST) model such as Flux, SD3, Wan or H3. Use eta 0 or core's res_multistep_ancestral."
         )
+    seed = extra_args.get("seed", None)
     if noise_sampler is None:
         noise_sampler = k_diffusion_sampling.default_noise_sampler(
-            x, seed=extra_args.get("seed", None)
+            x, seed=None if seed is None else seed ^ seed_offset
         )
     s_noise = s_noise * getattr(model_sampling, "noise_scale", 1.0)
     o = StreamOptions(eta, s_noise, noise_sampler, model_sampling)
@@ -96,7 +97,7 @@ class SamplerResMultistepFlow(io.ComfyNode):
     @classmethod
     def execute(cls, eta, s_noise) -> io.NodeOutput:
         return io.NodeOutput(
-            comfy.samplers.KSAMPLER(
+            ChainedKSAMPLER(
                 sample_res_multistep_flow,
                 extra_options={"eta": eta, "s_noise": s_noise},
             )

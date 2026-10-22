@@ -13,7 +13,7 @@ from comfy_api.latest import io
 import torch
 from tqdm.auto import trange
 
-# Video cannot run at sigma 0 because the model's noise mapping fixes 0, which would
+# Video cannot run at sigma 0 because the H3's noise mapping fixes 0, which would
 # pin audio to 0 as well. Running a frozen video at a constant epsilon leaves it
 # practically clean while keeping the audio mapping solvable.
 FROZEN_VIDEO_SIGMA = 0.0001
@@ -303,7 +303,7 @@ def brownian_noise(x, sigmas, seed, cpu):
     )
 
 
-def stage_offset(video_sigmas, audio_sigmas):
+def stage_offset(*schedules):
     """A stable per-stage offset for the ancestral noise stream.
 
     DisableNoise reports seed 0 on every pass, so two stages chained over a latent of the
@@ -318,10 +318,40 @@ def stage_offset(video_sigmas, audio_sigmas):
     """
     payload = b"".join(
         s.detach().to("cpu", torch.float32).contiguous().numpy().tobytes()
-        for s in (video_sigmas, audio_sigmas)
+        for s in schedules
     )
     digest = hashlib.blake2b(payload, digest_size=8).digest()
     return int.from_bytes(digest, "big") & ((1 << 62) - 1)
+
+
+class ChainedKSAMPLER(comfy.samplers.KSAMPLER):
+    """KSAMPLER that hands its sampler function a seed_offset for chained stages.
+
+    The function sees noise already scaled into the latent, so only here can it be told
+    that no noise was added, which is the DisableNoise case stage_offset exists for. The
+    offset goes to the ancestral draws only; the model is still given the reported seed.
+    """
+
+    def sample(
+        self, model_wrap, sigmas, extra_args, callback, noise, *args, **kwargs
+    ):
+        sampler = self
+        if extra_args.get("seed") is not None and not bool(noise.any()):
+            sampler = copy.copy(self)
+            sampler.extra_options = {
+                **self.extra_options,
+                "seed_offset": stage_offset(sigmas),
+            }
+        return comfy.samplers.KSAMPLER.sample(
+            sampler,
+            model_wrap,
+            sigmas,
+            extra_args,
+            callback,
+            noise,
+            *args,
+            **kwargs,
+        )
 
 
 class StreamOptions:
