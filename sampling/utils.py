@@ -205,18 +205,25 @@ def dpmpp_sde_stream(x, sigmas, o):
     return x
 
 
-def res_multistep_stream(x, sigmas, o):
+def res_multistep_stream(x, sigmas, o, finish_first_order=False):
     """Second-order multistep RES over one stream, mirroring core's res_multistep.
 
     eta 0 is core's res_multistep. Above 0 it is ancestral, but with the rectified flow
     split ancestral_stream uses instead of core's get_ancestral_step, which leaves a flow
     model's latent off its noise path and is what burns res_multistep_ancestral images.
+
+    finish_first_order takes Euler on the last step that lands on a nonzero sigma. A shift
+    terminal makes that step far longer than the one before it, and the multistep then
+    extrapolates the change between the last two x0 estimates several times over.
     """
     sigma_fn = lambda t: t.neg().exp()  # noqa: E731
     t_fn = lambda sigma: sigma.log().neg()  # noqa: E731
     phi1_fn = lambda t: torch.expm1(t) / t  # noqa: E731
     phi2_fn = lambda t: (phi1_fn(t) - 1.0) / t  # noqa: E731
 
+    last_noisy = max(
+        (i for i in range(len(sigmas) - 1) if sigmas[i + 1] > 0), default=-1
+    )
     old_sigma_down = None
     old_denoised = None
     for i in range(len(sigmas) - 1):
@@ -229,7 +236,11 @@ def res_multistep_stream(x, sigmas, o):
         sigma_down = sigmas[i + 1] * downstep_ratio
         # core takes Euler at sigma_down == 0; past the eta ceiling sigma_down goes
         # negative and the multistep's log turns nan, so Euler covers that too
-        if old_denoised is None or sigma_down <= 0:
+        if (
+            old_denoised is None
+            or sigma_down <= 0
+            or (finish_first_order and i == last_noisy)
+        ):
             # Euler method
             d = (x - denoised) / sigmas[i]
             x = x + d * (sigma_down - sigmas[i])
@@ -284,6 +295,93 @@ def res_multistep_stream(x, sigmas, o):
     return x
 
 
+def er_sde_stream(x, sigmas, o):
+    """ER-SDE-Solver-3 over one stream, mirroring core's sample_er_sde as SamplerER_SDE sets
+    it up for its ER-SDE solver type at max_stage 3, eta scaling the noise scaler the way
+    that node's eta does. eta 0 reduces the scaler to the ODE one, which adds no noise.
+
+    The first sigma is nudged off 1.0 the way core does, on the local copy only, as in
+    dpmpp_sde_stream.
+    """
+    sigmas = k_diffusion_sampling.offset_first_sigma_for_snr(
+        sigmas, o.model_sampling
+    )
+    # er_lambda_t = sigma_t / alpha_t
+    er_lambdas = (
+        k_diffusion_sampling.sigma_to_half_log_snr(
+            sigmas, model_sampling=o.model_sampling
+        )
+        .neg()
+        .exp()
+    )
+
+    def noise_scaler(v):
+        return v * ((v**0.3).exp() + 10.0) ** o.eta
+
+    num_integration_points = 200.0
+    point_indice = torch.arange(
+        0, num_integration_points, dtype=torch.float32, device=x.device
+    )
+
+    old_denoised = None
+    old_denoised_d = None
+    for i in range(len(sigmas) - 1):
+        denoised = yield (i, sigmas[i], x)
+        stage_used = min(3, i + 1)
+        if sigmas[i + 1] == 0:
+            x = denoised
+        else:
+            er_lambda_s, er_lambda_t = er_lambdas[i], er_lambdas[i + 1]
+            alpha_s = sigmas[i] / er_lambda_s
+            alpha_t = sigmas[i + 1] / er_lambda_t
+            r_alpha = alpha_t / alpha_s
+            r = noise_scaler(er_lambda_t) / noise_scaler(er_lambda_s)
+
+            # Stage 1 Euler
+            x = r_alpha * r * x + alpha_t * (1 - r) * denoised
+
+            if stage_used >= 2:
+                dt = er_lambda_t - er_lambda_s
+                lambda_step_size = -dt / num_integration_points
+                lambda_pos = er_lambda_t + point_indice * lambda_step_size
+                scaled_pos = noise_scaler(lambda_pos)
+
+                # Stage 2. A constant schedule (the frozen-video path) divides 0 by 0
+                # here; its step weights are 0 too, so the nan is zeroed out.
+                s = torch.sum(1 / scaled_pos) * lambda_step_size
+                denoised_d = torch.nan_to_num(
+                    (denoised - old_denoised) / (er_lambda_s - er_lambdas[i - 1]),
+                    nan=0.0,
+                )
+                x = x + alpha_t * (dt + s * noise_scaler(er_lambda_t)) * denoised_d
+
+                if stage_used >= 3:
+                    # Stage 3
+                    s_u = (
+                        torch.sum((lambda_pos - er_lambda_s) / scaled_pos)
+                        * lambda_step_size
+                    )
+                    denoised_u = torch.nan_to_num(
+                        (denoised_d - old_denoised_d)
+                        / ((er_lambda_s - er_lambdas[i - 2]) / 2),
+                        nan=0.0,
+                    )
+                    x = x + alpha_t * (
+                        (dt**2) / 2 + s_u * noise_scaler(er_lambda_t)
+                    ) * denoised_u
+                old_denoised_d = denoised_d
+
+            # SamplerER_SDE zeroes s_noise at eta 0, so the ODE adds no rounding-sized noise
+            if o.eta > 0 and o.s_noise > 0:
+                x = x + alpha_t * o.noise(
+                    sigmas[i], sigmas[i + 1]
+                ) * o.s_noise * (
+                    er_lambda_t**2 - er_lambda_s**2 * r**2
+                ).sqrt().nan_to_num(nan=0.0)
+        old_denoised = denoised
+    return x
+
+
 def brownian_noise(x, sigmas, seed, cpu):
     """A torchsde Brownian path over one stream's own schedule.
 
@@ -303,7 +401,7 @@ def brownian_noise(x, sigmas, seed, cpu):
     )
 
 
-def stage_offset(*schedules):
+def stage_offset(video_sigmas, audio_sigmas):
     """A stable per-stage offset for the ancestral noise stream.
 
     DisableNoise reports seed 0 on every pass, so two stages chained over a latent of the
@@ -318,40 +416,10 @@ def stage_offset(*schedules):
     """
     payload = b"".join(
         s.detach().to("cpu", torch.float32).contiguous().numpy().tobytes()
-        for s in schedules
+        for s in (video_sigmas, audio_sigmas)
     )
     digest = hashlib.blake2b(payload, digest_size=8).digest()
     return int.from_bytes(digest, "big") & ((1 << 62) - 1)
-
-
-class ChainedKSAMPLER(comfy.samplers.KSAMPLER):
-    """KSAMPLER that hands its sampler function a seed_offset for chained stages.
-
-    The function sees noise already scaled into the latent, so only here can it be told
-    that no noise was added, which is the DisableNoise case stage_offset exists for. The
-    offset goes to the ancestral draws only; the model is still given the reported seed.
-    """
-
-    def sample(
-        self, model_wrap, sigmas, extra_args, callback, noise, *args, **kwargs
-    ):
-        sampler = self
-        if extra_args.get("seed") is not None and not bool(noise.any()):
-            sampler = copy.copy(self)
-            sampler.extra_options = {
-                **self.extra_options,
-                "seed_offset": stage_offset(sigmas),
-            }
-        return comfy.samplers.KSAMPLER.sample(
-            sampler,
-            model_wrap,
-            sigmas,
-            extra_args,
-            callback,
-            noise,
-            *args,
-            **kwargs,
-        )
 
 
 class StreamOptions:

@@ -1,10 +1,11 @@
 from comfy.k_diffusion import sampling as k_diffusion_sampling
 import comfy.model_sampling
+import comfy.samplers
 from comfy_api.latest import io
 import torch
 from tqdm.auto import trange
 
-from .utils import ChainedKSAMPLER, StreamOptions, res_multistep_stream
+from .utils import StreamOptions, res_multistep_stream
 
 
 @torch.no_grad()
@@ -18,7 +19,7 @@ def sample_res_multistep_flow(
     eta=0.0,
     s_noise=1.0,
     noise_sampler=None,
-    seed_offset=0,
+    finish_first_order=False,
 ):
     """Core's res_multistep at eta 0, the dual sampler's flow-model ancestral above it.
 
@@ -33,16 +34,15 @@ def sample_res_multistep_flow(
         raise ValueError(
             "eta above 0 uses the flow-model noise split, which needs a rectified flow (CONST) model such as Flux, SD3, Wan or H3. Use eta 0 or core's res_multistep_ancestral."
         )
-    seed = extra_args.get("seed", None)
     if noise_sampler is None:
         noise_sampler = k_diffusion_sampling.default_noise_sampler(
-            x, seed=None if seed is None else seed ^ seed_offset
+            x, seed=extra_args.get("seed", None)
         )
     s_noise = s_noise * getattr(model_sampling, "noise_scale", 1.0)
     o = StreamOptions(eta, s_noise, noise_sampler, model_sampling)
     s_in = x.new_ones([x.shape[0]])
 
-    stream = res_multistep_stream(x, sigmas, o)
+    stream = res_multistep_stream(x, sigmas, o, finish_first_order)
     i, sigma, x = next(stream)
     for _ in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigma * s_in, **extra_args)
@@ -90,16 +90,25 @@ class SamplerResMultistepFlow(io.ComfyNode):
                     round=False,
                     tooltip="Scales the noise added each step.",
                 ),
+                io.Boolean.Input(
+                    "finish_first_order",
+                    default=False,
+                    tooltip="Uses Euler on the last step before 0. Turn on for schedules with a shift terminal or with the normal scheduler.",
+                ),
             ],
             outputs=[io.Sampler.Output()],
         )
 
     @classmethod
-    def execute(cls, eta, s_noise) -> io.NodeOutput:
+    def execute(cls, eta, s_noise, finish_first_order) -> io.NodeOutput:
         return io.NodeOutput(
-            ChainedKSAMPLER(
+            comfy.samplers.KSAMPLER(
                 sample_res_multistep_flow,
-                extra_options={"eta": eta, "s_noise": s_noise},
+                extra_options={
+                    "eta": eta,
+                    "s_noise": s_noise,
+                    "finish_first_order": finish_first_order,
+                },
             )
         )
 
