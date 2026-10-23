@@ -1,3 +1,5 @@
+from functools import partial
+
 from comfy_api.latest import io
 
 from .utils import DualSampler, DualSamplerType, er_sde_stream
@@ -8,10 +10,22 @@ class DualSamplerERSDE(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="DualSamplerERSDE",
-            display_name="🐧 DualSamplerERSDE",
+            display_name="🐧 DualSamplerER_SDE",
             category="SuperNodes/Sampling",
             description="ER-SDE with separate noise settings for the video and audio streams.",
             inputs=[
+                io.Combo.Input(
+                    "solver_type",
+                    options=["ER-SDE", "Reverse-time SDE", "ODE"],
+                    tooltip="Noise schedule shared by both streams. ER-SDE renews heavily early and fades out, Reverse-time SDE renews at a constant rate, ODE adds none.",
+                ),
+                io.Int.Input(
+                    "max_stage",
+                    default=3,
+                    min=1,
+                    max=3,
+                    tooltip="Solver order shared by both streams. 1 is Euler, 2 and 3 reuse the previous x0 estimates.",
+                ),
                 io.Float.Input(
                     "eta_video",
                     default=1.0,
@@ -58,7 +72,13 @@ class DualSamplerERSDE(io.ComfyNode):
 
     @classmethod
     def execute(
-        cls, eta_video, eta_audio, s_noise_video, s_noise_audio
+        cls,
+        solver_type,
+        max_stage,
+        eta_video,
+        eta_audio,
+        s_noise_video,
+        s_noise_audio,
     ) -> io.NodeOutput:
         return io.NodeOutput(
             DualSampler(
@@ -66,7 +86,9 @@ class DualSamplerERSDE(io.ComfyNode):
                 eta_audio,
                 s_noise_video,
                 s_noise_audio,
-                stream_fn=er_sde_stream,
+                stream_fn=partial(
+                    er_sde_stream, solver_type=solver_type, max_stage=max_stage
+                ),
             )
         )
 

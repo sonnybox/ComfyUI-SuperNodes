@@ -295,10 +295,10 @@ def res_multistep_stream(x, sigmas, o, finish_first_order=False):
     return x
 
 
-def er_sde_stream(x, sigmas, o):
-    """ER-SDE-Solver-3 over one stream, mirroring core's sample_er_sde as SamplerER_SDE sets
-    it up for its ER-SDE solver type at max_stage 3, eta scaling the noise scaler the way
-    that node's eta does. eta 0 reduces the scaler to the ODE one, which adds no noise.
+def er_sde_stream(x, sigmas, o, solver_type, max_stage):
+    """ER-SDE-Solver over one stream, mirroring core's sample_er_sde as SamplerER_SDE sets
+    it up: solver_type picks the noise scaler, eta scales it, and the ODE (solver_type ODE,
+    or eta 0) adds no noise. The DualSampler binds solver_type and max_stage with partial.
 
     The first sigma is nudged off 1.0 the way core does, on the local copy only, as in
     dpmpp_sde_stream.
@@ -315,7 +315,13 @@ def er_sde_stream(x, sigmas, o):
         .exp()
     )
 
+    ode = solver_type == "ODE" or o.eta == 0
+
     def noise_scaler(v):
+        if ode:
+            return v
+        if solver_type == "Reverse-time SDE":
+            return v ** (o.eta + 1)
         return v * ((v**0.3).exp() + 10.0) ** o.eta
 
     num_integration_points = 200.0
@@ -327,7 +333,7 @@ def er_sde_stream(x, sigmas, o):
     old_denoised_d = None
     for i in range(len(sigmas) - 1):
         denoised = yield (i, sigmas[i], x)
-        stage_used = min(3, i + 1)
+        stage_used = min(max_stage, i + 1)
         if sigmas[i + 1] == 0:
             x = denoised
         else:
@@ -371,8 +377,8 @@ def er_sde_stream(x, sigmas, o):
                     ) * denoised_u
                 old_denoised_d = denoised_d
 
-            # SamplerER_SDE zeroes s_noise at eta 0, so the ODE adds no rounding-sized noise
-            if o.eta > 0 and o.s_noise > 0:
+            # SamplerER_SDE zeroes s_noise for the ODE, so it adds no rounding-sized noise
+            if not ode and o.s_noise > 0:
                 x = x + alpha_t * o.noise(
                     sigmas[i], sigmas[i + 1]
                 ) * o.s_noise * (
