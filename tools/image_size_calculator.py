@@ -28,26 +28,50 @@ class ImageSizeCalculator(io.ComfyNode):
                     step=1,
                     tooltip="The height ratio of the desired aspect ratio (e.g., 9 for 16:9).",
                 ),
-                io.Combo.Input(
+                io.DynamicCombo.Input(
                     "mode",
-                    options=["max_size", "min_size", "megapixels"],
-                    tooltip="Determines if the size applies to max/min dimension, or if target is total megapixels.",
-                ),
-                io.Int.Input(
-                    "size",
-                    default=1024,
-                    min=1,
-                    max=32768,
-                    step=1,
-                    tooltip="The target length for the dimension specified by dimension mode.",
-                ),
-                io.Float.Input(
-                    "megapixels",
-                    default=1.00,
-                    min=0.01,
-                    max=1024.0,
-                    step=0.01,
-                    tooltip="The target total megapixels when mode is 'megapixels'.",
+                    tooltip="Fit the longest side, the shortest side, or a total pixel count.",
+                    options=[
+                        io.DynamicCombo.Option(
+                            "max_size",
+                            [
+                                io.Int.Input(
+                                    "size",
+                                    default=1024,
+                                    min=1,
+                                    max=32768,
+                                    step=1,
+                                    tooltip="Length of the longest side.",
+                                ),
+                            ],
+                        ),
+                        io.DynamicCombo.Option(
+                            "min_size",
+                            [
+                                io.Int.Input(
+                                    "size",
+                                    default=1024,
+                                    min=1,
+                                    max=32768,
+                                    step=1,
+                                    tooltip="Length of the shortest side.",
+                                ),
+                            ],
+                        ),
+                        io.DynamicCombo.Option(
+                            "megapixels",
+                            [
+                                io.Float.Input(
+                                    "megapixels",
+                                    default=1.00,
+                                    min=0.01,
+                                    max=1024.0,
+                                    step=0.01,
+                                    tooltip="Target total megapixels.",
+                                ),
+                            ],
+                        ),
+                    ],
                 ),
                 io.Int.Input(
                     "multiple_of",
@@ -76,37 +100,23 @@ class ImageSizeCalculator(io.ComfyNode):
         )
 
     @classmethod
-    def execute(
-        cls, aspect_w, aspect_h, mode, size, megapixels, multiple_of
-    ) -> io.NodeOutput:
-        # Calculate aspect ratio
+    def execute(cls, aspect_w, aspect_h, mode, multiple_of) -> io.NodeOutput:
         ratio = aspect_w / aspect_h
+        choice = mode["mode"]
 
-        target_w = 0.0
-        target_h = 0.0
-
-        if mode == "max_size":
-            if aspect_w >= aspect_h:
-                # Width is the longest side
-                target_w = size
-                target_h = size / ratio
-            else:
-                # Height is the longest side
-                target_h = size
-                target_w = size * ratio
-        elif mode == "min_size":
-            if aspect_w <= aspect_h:
-                # Width is the shortest side
-                target_w = size
-                target_h = size / ratio
-            else:
-                # Height is the shortest side
-                target_h = size
-                target_w = size * ratio
-        elif mode == "megapixels":
-            target_pixels = megapixels * 1024 * 1024
+        if choice == "megapixels":
+            target_pixels = mode["megapixels"] * 1024 * 1024
             target_h = math.sqrt(target_pixels / ratio)
             target_w = target_h * ratio
+        else:
+            size = mode["size"]
+            # Pin width when it is the side being fitted, otherwise pin height
+            if (aspect_w >= aspect_h) == (choice == "max_size"):
+                target_w = size
+                target_h = size / ratio
+            else:
+                target_h = size
+                target_w = size * ratio
 
         # Round to nearest multiple, breaking exact ties downwards
         final_w = math.ceil(target_w / multiple_of - 0.5 - 1e-9) * multiple_of
