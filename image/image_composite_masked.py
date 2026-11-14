@@ -70,6 +70,7 @@ class SuperImageCompositeMasked(io.ComfyNode):
             node_id="SuperImageCompositeMasked",
             display_name="🐧 Image Composite Masked",
             category="SuperNodes/Image",
+            description="The stock Image Composite Masked node, but allows negative x/y coordinates.",
             inputs=[
                 io.Image.Input("destination", tooltip="The canvas the source is pasted onto."),
                 io.Image.Input("source", tooltip="The layer to paste onto the destination."),
